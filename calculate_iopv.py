@@ -79,6 +79,7 @@ class IOPVCalculator:
         注意:
             - 时间格式会自动转换为与场内价格一致的格式
             - 支持AM/PM格式和24小时制格式的转换
+            - 包含重试机制，最多重试3次
         
         使用示例:
             >>> calculator = IOPVCalculator()
@@ -86,13 +87,49 @@ class IOPVCalculator:
             >>> print(result)
             {'date': '26-Feb-2026', 'time': '2026-02-26 16:59:00', 'nav_usd': 2.038}
         """
+        max_retries = 3
+        retry_count = 0
+        
+        while retry_count < max_retries:
+            try:
+                response = requests.get(
+                    self.iframe_url, 
+                    headers={
+                        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36",
+                        "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
+                        "Referer": self.url
+                    },
+                    timeout=30,
+                    verify=True
+                )
+                response.raise_for_status()
+                break
+            except requests.exceptions.SSLError as e:
+                retry_count += 1
+                if retry_count < max_retries:
+                    print(f"SSL连接错误，正在重试 ({retry_count}/{max_retries})...")
+                    time.sleep(2)
+                else:
+                    print(f"SSL连接错误，已达到最大重试次数: {e}")
+                    return {'date': 'N/A', 'time': 'N/A', 'nav_usd': None}
+            except requests.exceptions.Timeout as e:
+                retry_count += 1
+                if retry_count < max_retries:
+                    print(f"请求超时，正在重试 ({retry_count}/{max_retries})...")
+                    time.sleep(2)
+                else:
+                    print(f"请求超时，已达到最大重试次数: {e}")
+                    return {'date': 'N/A', 'time': 'N/A', 'nav_usd': None}
+            except requests.exceptions.RequestException as e:
+                retry_count += 1
+                if retry_count < max_retries:
+                    print(f"网络请求错误，正在重试 ({retry_count}/{max_retries})...")
+                    time.sleep(2)
+                else:
+                    print(f"网络请求错误，已达到最大重试次数: {e}")
+                    return {'date': 'N/A', 'time': 'N/A', 'nav_usd': None}
+        
         try:
-            response = requests.get(self.iframe_url, headers={
-                "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36",
-                "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
-                "Referer": self.url
-            })
-            response.raise_for_status()
             
             html = etree.HTML(response.content)
             
