@@ -4,6 +4,7 @@
 """
 
 from .fund_159687 import Fund159687
+from .fund_513730 import Fund513730
 
 # 添加新基金时在这里导入
 # from .fund_159915 import Fund159915
@@ -11,6 +12,7 @@ from .fund_159687 import Fund159687
 
 __all__ = [
     'Fund159687',
+    'Fund513730',
     # 'Fund159915',
     # 'FundXXXXX',
 ]
@@ -18,6 +20,7 @@ __all__ = [
 # 所有可用的基金列表
 AVAILABLE_FUNDS = [
     Fund159687,
+    Fund513730,
     # Fund159915,
     # FundXXXXX,
 ]

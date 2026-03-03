@@ -58,11 +58,9 @@ def run_cli(fund_code: str = None):
         data = fund.calculate()
         fund.print_table(data)
         
-        # 保存数据
-        save = input("\n是否保存数据到文件? (y/n): ")
-        if save.lower() == 'y':
-            filepath = fund.save_to_file(data)
-            print(f"数据已保存到: {filepath}")
+        # 自动保存数据
+        filepath = fund.save_to_file(data)
+        print(f"\n数据已保存到: {filepath}")
     except Exception as e:
         print(f"计算失败: {e}")
 
