@@ -3,6 +3,7 @@ import tkinter as tk
 from tkinter import ttk
 from datetime import datetime
 import threading
+import os
 from calculate_iopv import IOPVCalculator
 
 class IOPVGUI:
@@ -23,6 +24,20 @@ class IOPVGUI:
         self.calculator = IOPVCalculator()
         self.auto_refresh_interval = 30000  # 30秒自动刷新一次
         self.auto_refresh_id = None
+        
+        # 存储最后的数据
+        self.last_data = {
+            'market_price_info': None,
+            'premium_discount': None,
+            'estimated_nav': None,
+            'intraday_result': None,
+            'latest_nav': None,
+            'historical_nav': None,
+            'nav_change_result': None
+        }
+        
+        # 绑定窗口关闭事件
+        self.root.protocol("WM_DELETE_WINDOW", self.on_closing)
         
         self.setup_ui()
         
@@ -128,8 +143,15 @@ class IOPVGUI:
         
         def fetch_data():
             try:
-                # 获取数据
-                intraday_result = self.calculator.get_intraday_nav()
+                # 获取数据 - 先尝试新API
+                print("正在获取实时净值...")
+                intraday_result = self.calculator.get_intraday_nav_from_api()
+                
+                # 如果新API失败，使用原来的方法
+                if intraday_result is None or intraday_result.get('nav_usd') is None:
+                    print("新API获取失败，尝试使用原来的方法...")
+                    intraday_result = self.calculator.get_intraday_nav()
+                
                 market_price_info = self.calculator.get_market_price()
                 latest_nav = self.calculator.get_latest_nav()
                 
@@ -157,6 +179,17 @@ class IOPVGUI:
                     market_price_info, intraday_result, latest_nav, 
                     historical_nav, nav_change_result, estimated_nav, premium_discount
                 )
+                
+                # 保存最后的数据
+                self.last_data = {
+                    'market_price_info': market_price_info,
+                    'premium_discount': premium_discount,
+                    'estimated_nav': estimated_nav,
+                    'intraday_result': intraday_result,
+                    'latest_nav': latest_nav,
+                    'historical_nav': historical_nav,
+                    'nav_change_result': nav_change_result
+                }
                 
                 # 更新UI
                 self.root.after(0, lambda: self.update_ui(
@@ -229,6 +262,146 @@ class IOPVGUI:
         self.refresh_data()
         # 继续设置下一次自动刷新
         self.auto_refresh_id = self.root.after(self.auto_refresh_interval, self.auto_refresh)
+    
+    def on_closing(self):
+        """窗口关闭事件处理"""
+        # 取消自动刷新
+        if self.auto_refresh_id:
+            self.root.after_cancel(self.auto_refresh_id)
+        
+        # 保存最后的数据到txt文件
+        self.save_last_data_to_file()
+        
+        # 关闭窗口
+        self.root.destroy()
+    
+    def save_last_data_to_file(self):
+        """保存最后的数据到txt文件"""
+        try:
+            # 检查是否有数据
+            if not self.last_data or self.last_data.get('market_price_info') is None:
+                print("没有数据需要保存")
+                return
+            
+            # 生成文件名（使用当前日期）
+            today = datetime.now().strftime("%Y-%m-%d")
+            filename = f"159687_估值数据_{today}.txt"
+            
+            # 写入文件
+            with open(filename, 'w', encoding='utf-8') as f:
+                f.write("=" * 80 + "\n")
+                f.write("159687 实时估值数据 - 最后记录\n")
+                f.write("=" * 80 + "\n\n")
+                
+                # 写入保存时间
+                f.write(f"保存时间: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}\n\n")
+                
+                # 写入市场信息
+                market_price_info = self.last_data.get('market_price_info')
+                if market_price_info:
+                    f.write("-" * 80 + "\n")
+                    f.write("场内价格信息\n")
+                    f.write("-" * 80 + "\n")
+                    price = market_price_info.get('price')
+                    change_pct = market_price_info.get('change_pct')
+                    time_str = market_price_info.get('time')
+                    
+                    if price:
+                        f.write(f"场内价格: {price:.3f} CNY\n")
+                    if change_pct is not None:
+                        if change_pct >= 0:
+                            f.write(f"涨跌幅: +{change_pct:.2f}%\n")
+                        else:
+                            f.write(f"涨跌幅: {change_pct:.2f}%\n")
+                    if time_str:
+                        f.write(f"更新时间: {time_str}\n")
+                    f.write("\n")
+                
+                # 写入溢价率
+                premium_discount = self.last_data.get('premium_discount')
+                if premium_discount is not None:
+                    f.write("-" * 80 + "\n")
+                    f.write("溢价/折价率\n")
+                    f.write("-" * 80 + "\n")
+                    if premium_discount >= 0:
+                        f.write(f"溢价率: +{premium_discount:.2f}% (溢价)\n")
+                    else:
+                        f.write(f"折价率: {premium_discount:.2f}% (折价)\n")
+                    f.write("\n")
+                
+                # 写入估算净值
+                estimated_nav = self.last_data.get('estimated_nav')
+                if estimated_nav:
+                    f.write("-" * 80 + "\n")
+                    f.write("估算实时净值\n")
+                    f.write("-" * 80 + "\n")
+                    f.write(f"估算净值: {estimated_nav:.4f} CNY\n")
+                    f.write("\n")
+                
+                # 写入最新基金净值
+                latest_nav = self.last_data.get('latest_nav')
+                if latest_nav:
+                    f.write("-" * 80 + "\n")
+                    f.write("最新基金净值\n")
+                    f.write("-" * 80 + "\n")
+                    nav = latest_nav.get('nav')
+                    date = latest_nav.get('date')
+                    if nav:
+                        f.write(f"单位净值: {nav} CNY\n")
+                    if date:
+                        f.write(f"净值日期: {date}\n")
+                    f.write("\n")
+                
+                # 写入Intraday NAV
+                intraday_result = self.last_data.get('intraday_result')
+                if intraday_result:
+                    f.write("-" * 80 + "\n")
+                    f.write("Intraday NAV (实时净值)\n")
+                    f.write("-" * 80 + "\n")
+                    nav_usd = intraday_result.get('nav_usd')
+                    time_str = intraday_result.get('time')
+                    if nav_usd:
+                        f.write(f"实时净值: {nav_usd} USD\n")
+                    if time_str:
+                        f.write(f"更新时间: {time_str}\n")
+                    f.write("\n")
+                
+                # 写入Historical NAV
+                historical_nav = self.last_data.get('historical_nav')
+                if historical_nav:
+                    f.write("-" * 80 + "\n")
+                    f.write("Historical NAV (历史净值)\n")
+                    f.write("-" * 80 + "\n")
+                    nav = historical_nav.get('nav')
+                    date = historical_nav.get('date')
+                    if nav:
+                        f.write(f"历史净值: {nav} USD\n")
+                    if date:
+                        f.write(f"日期: {date}\n")
+                    f.write("\n")
+                
+                # 写入NAV涨跌幅
+                nav_change_result = self.last_data.get('nav_change_result')
+                if nav_change_result:
+                    f.write("-" * 80 + "\n")
+                    f.write("NAV涨跌幅\n")
+                    f.write("-" * 80 + "\n")
+                    change_pct = nav_change_result.get('change_pct')
+                    if change_pct is not None:
+                        if change_pct >= 0:
+                            f.write(f"涨跌幅: +{change_pct:.2f}%\n")
+                        else:
+                            f.write(f"涨跌幅: {change_pct:.2f}%\n")
+                    f.write("\n")
+                
+                f.write("=" * 80 + "\n")
+                f.write("数据保存完成\n")
+                f.write("=" * 80 + "\n")
+            
+            print(f"数据已保存到文件: {filename}")
+            
+        except Exception as e:
+            print(f"保存数据时出错: {e}")
 
 if __name__ == "__main__":
     app = IOPVGUI()

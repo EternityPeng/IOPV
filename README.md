@@ -1,87 +1,158 @@
-# 159687 实时估值计算
+# 159687 ETF 实时估值计算系统
 
-本项目用于计算和显示ETF 159687的实时估值和溢价/折价率。
+一个支持多基金扩展的实时估值计算系统，采用插件式架构设计。
 
-## 功能特点
-
-- 获取CSOP官网的历史NAV数据
-- 计算NAV变化百分比
-- 基于历史数据估算实时NAV
-- 显示市场价格及其变化百分比
-- 计算并显示溢价/折价率
-- 支持手动刷新和自动刷新
-- 提供GUI界面和命令行界面
-
-## 目录结构
+## 📁 项目结构
 
 ```
 IOPV/
-├── calculate_iopv.py  # 核心计算模块
-├── iopv_gui.py        # GUI界面
-├── iopv_cli.py        # 命令行界面
-├── test_gui.py        # GUI测试脚本
-├── official_nav_cache.json    # 官方NAV缓存
-├── latest_nav_cache.json      # 最新NAV缓存
-├── historical_nav_cache.json  # 历史NAV缓存
-└── README.md          # 说明文档
+├── core/                          # 核心框架
+│   ├── __init__.py                # 核心模块导出
+│   ├── base.py                    # 基类定义（BaseFund, FundData）
+│   ├── gui_framework.py           # GUI框架
+│   └── utils.py                   # 工具函数
+│
+├── funds/                         # 基金模块（插件式）
+│   ├── __init__.py                # 基金列表管理
+│   └── fund_159687.py             # 159687基金模块
+│
+├── cache/                         # 缓存数据
+│   └── 159687/                    # 按基金代码分类
+│
+├── output/                        # 输出文件
+│   └── 159687/                    # 按基金代码分类
+│
+├── v1_legacy/                     # 旧版本（保留作为蓝本）
+│   ├── README.md                  # 旧版本使用说明
+│   ├── calculate_iopv.py          # 旧版本核心计算模块
+│   ├── iopv_gui.py                # 旧版本GUI
+│   └── ...
+│
+├── main.py                        # 主程序入口
+└── README.md                      # 本文件
 ```
 
-## 依赖项
+## 🚀 使用方法
 
-- Python 3.7+
-- tkinter (GUI界面)
-- requests
-- lxml
-- akshare
-- DrissionPage (用于网页数据抓取)
+### 1. 列出所有可用基金
 
-## 安装依赖
+```bash
+python main.py --list
+```
+
+### 2. 命令行模式（单次获取）
+
+```bash
+python main.py --cli 159687
+```
+
+### 3. GUI模式（实时监控）
+
+```bash
+python main.py
+```
+
+## 🔧 添加新基金
+
+只需3步：
+
+### 步骤1：创建基金模块
+
+在 `funds/` 目录下创建新文件 `fund_xxxxx.py`：
+
+```python
+from core.base import BaseFund, FundData
+
+class FundXXXXX(BaseFund):
+    @property
+    def fund_code(self) -> str:
+        return "xxxxx"
+  
+    @property
+    def fund_name(self) -> str:
+        return "基金名称"
+  
+    @property
+    def description(self) -> str:
+        return "基金描述"
+  
+    @property
+    def update_interval(self) -> int:
+        return 30  # 刷新间隔（秒）
+  
+    def calculate(self) -> FundData:
+        """实现你的估值逻辑"""
+        # 可以使用：
+        # - API调用
+        # - 网页爬虫
+        # - 股票组合计算
+        # - 任何自定义方法
+      
+        return FundData(
+            fund_code=self.fund_code,
+            fund_name=self.fund_name,
+            market_price=...,
+            estimated_nav=...,
+            # ...
+        )
+```
+
+### 步骤2：注册基金
+
+在 `funds/__init__.py` 中添加：
+
+```python
+from .fund_xxxxx import FundXXXXX
+
+__all__ = ['Fund159687', 'FundXXXXX']
+AVAILABLE_FUNDS = [Fund159687, FundXXXXX]
+```
+
+### 步骤3：创建缓存目录
+
+```bash
+mkdir cache\xxxxx output\xxxxx
+```
+
+## 📊 已支持的基金
+
+| 基金代码 | 基金名称                    | 数据来源                     |
+| -------- | --------------------------- | ---------------------------- |
+| 159687   | 南方东英富时亚太低碳精选ETF | ICE API + 新浪财经 + akshare |
+
+## 📦 依赖安装
 
 ```bash
 pip install requests lxml akshare DrissionPage
 ```
 
-## 使用方法
+## 📝 旧版本
 
-### GUI版本
-
-```bash
-python iopv_gui.py
-```
-
-- 启动时会自动刷新一次数据
-- 每30秒自动刷新一次数据
-- 点击"刷新数据"按钮可以手动刷新数据
-- 溢价率显示为红色表示溢价，绿色表示折价
-- 价格涨跌幅显示为红色表示上涨，绿色表示下跌
-
-### 命令行版本
+如需使用旧版本（单基金版本），请查看 `v1_legacy/` 目录：
 
 ```bash
-python iopv_cli.py
+cd v1_legacy
+python calculate_iopv.py  # 命令行模式
+python iopv_gui.py        # GUI模式
 ```
 
-- 启动时会自动刷新一次数据
-- 每30秒自动刷新一次数据
-- 按 Ctrl+C 退出程序
+## ✅ 功能特点
 
-## 数据来源
+| 特性          | 说明                       |
+| ------------- | -------------------------- |
+| 🔌 插件式架构 | 每个基金独立模块，互不影响 |
+| 📊 统一接口   | 所有基金遵循相同的基类规范 |
+| 🎯 易于扩展   | 添加新基金只需创建新模块   |
+| 📁 文件管理   | 缓存和输出按基金代码分类   |
+| 🖥️ 多种模式 | 支持GUI、命令行、列表查询  |
+| 💾 数据保存   | 关闭GUI时自动保存数据      |
+| 🔄 自动刷新   | GUI支持自动刷新功能        |
 
-- 历史NAV数据：CSOP官网
-- 实时NAV数据：CSOP官网的iframe页面
-- 市场价格数据：新浪财经API
-- 最新基金净值：akshare库
+## 📅 版本历史
 
-## 注意事项
+- **V1**: 单基金版本（保留在 `v1_legacy/` 目录）
+- **V2**: 插件式架构，支持多基金扩展（当前版本）
 
-- 首次运行时会抓取数据并缓存，可能需要较长时间
-- 缓存数据每天更新一次，避免重复抓取
-- 如果网络连接不稳定，可能会导致数据获取失败
-- GUI版本需要在有图形界面的环境中运行
-- 命令行版本可以在任何环境中运行
+---
 
-## 故障排除
-
-- 如果GUI无法启动，尝试使用命令行版本
-- 如果数据获取失败，检查网络连接
-- 如果缓存文件损坏，删除缓存文件后重新运行
+**最后更新**: 2026-03-03
