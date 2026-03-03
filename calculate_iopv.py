@@ -55,8 +55,10 @@ class IOPVCalculator:
         """
         self.url = "https://www.csopasset.com/sg/en/products/sg-carbon/etf.php"
         self.iframe_url = "https://csopasset.factsetdigitalsolutions.com/application/index/quote?s=LCU-SG"
+        self.api_url = "https://inav.ice.com/api/1/csop/application/index/quote?symbol=LCU-SG&language=en"
         self.latest_nav_cache_file = "latest_nav_cache.json"
         self.historical_nav_cache_file = "historical_nav_cache.json"
+        self.intraday_nav_cache_file = "intraday_nav_cache.json"
     
     def get_intraday_nav(self):
         """
@@ -90,15 +92,47 @@ class IOPVCalculator:
         max_retries = 3
         retry_count = 0
         
+        # 创建session来维持状态
+        session = requests.Session()
+        
+        # 完整的浏览器headers
+        headers = {
+            "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
+            "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,image/apng,*/*;q=0.8,application/signed-exchange;v=b3;q=0.7",
+            "Accept-Language": "en-US,en;q=0.9,zh-CN;q=0.8,zh;q=0.7",
+            "Accept-Encoding": "gzip, deflate, br",
+            "Connection": "keep-alive",
+            "Upgrade-Insecure-Requests": "1",
+            "Sec-Fetch-Dest": "iframe",
+            "Sec-Fetch-Mode": "navigate",
+            "Sec-Fetch-Site": "same-site",
+            "Sec-Fetch-User": "?1",
+            "Cache-Control": "max-age=0"
+        }
+        
+        # 先访问主页面获取cookies
+        try:
+            print("正在访问主页面获取cookies...")
+            main_response = session.get(
+                self.url,
+                headers=headers,
+                timeout=30
+            )
+            main_response.raise_for_status()
+            print("主页面访问成功")
+        except Exception as e:
+            print(f"访问主页面失败: {e}")
+            return self._get_cached_intraday_nav()
+        
         while retry_count < max_retries:
             try:
-                response = requests.get(
+                # 添加Referer和更新headers
+                iframe_headers = headers.copy()
+                iframe_headers["Referer"] = self.url
+                
+                response = session.get(
                     self.iframe_url, 
-                    headers={
-                        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36",
-                        "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
-                        "Referer": self.url
-                    },
+                    headers=iframe_headers,
                     timeout=30,
                     verify=True
                 )
@@ -111,7 +145,8 @@ class IOPVCalculator:
                     time.sleep(2)
                 else:
                     print(f"SSL连接错误，已达到最大重试次数: {e}")
-                    return {'date': 'N/A', 'time': 'N/A', 'nav_usd': None}
+                    # 尝试使用缓存数据
+                    return self._get_cached_intraday_nav()
             except requests.exceptions.Timeout as e:
                 retry_count += 1
                 if retry_count < max_retries:
@@ -119,7 +154,15 @@ class IOPVCalculator:
                     time.sleep(2)
                 else:
                     print(f"请求超时，已达到最大重试次数: {e}")
-                    return {'date': 'N/A', 'time': 'N/A', 'nav_usd': None}
+                    return self._get_cached_intraday_nav()
+            except requests.exceptions.HTTPError as e:
+                retry_count += 1
+                if retry_count < max_retries:
+                    print(f"HTTP错误 ({e.response.status_code})，正在重试 ({retry_count}/{max_retries})...")
+                    time.sleep(2)
+                else:
+                    print(f"HTTP错误，已达到最大重试次数: {e}")
+                    return self._get_cached_intraday_nav()
             except requests.exceptions.RequestException as e:
                 retry_count += 1
                 if retry_count < max_retries:
@@ -127,7 +170,7 @@ class IOPVCalculator:
                     time.sleep(2)
                 else:
                     print(f"网络请求错误，已达到最大重试次数: {e}")
-                    return {'date': 'N/A', 'time': 'N/A', 'nav_usd': None}
+                    return self._get_cached_intraday_nav()
         
         try:
             
@@ -198,11 +241,174 @@ class IOPVCalculator:
             if usd_nav_elements:
                 result['nav_usd'] = float(usd_nav_elements[0].text.strip())
             
+            # 保存到缓存
+            self._save_intraday_nav_cache(result)
+            
             return result
                 
         except Exception as e:
             print(f"获取实时净值时出错: {e}")
+            return self._get_cached_intraday_nav()
+    
+    def get_intraday_nav_from_api(self):
+        """
+        从ICE API获取实时净值（Intraday NAV）
+        
+        使用新的ICE API获取实时净值数据。该API返回JSON格式数据，
+        更稳定可靠。
+        
+        返回:
+            dict: 包含以下键的字典:
+                - date (str): 日期，格式为 "DD-Mon-YYYY"
+                - time (str): 时间，格式为 "YYYY-MM-DD HH:MM:SS"
+                - nav_usd (float): 实时净值（美元）
+                
+                如果获取失败，返回 None
+        
+        使用示例:
+            >>> calculator = IOPVCalculator()
+            >>> result = calculator.get_intraday_nav_from_api()
+            >>> print(result)
+            {'date': '03-Mar-2026', 'time': '2026-03-03 13:34:00', 'nav_usd': 1.9539}
+        """
+        max_retries = 3
+        retry_count = 0
+        
+        while retry_count < max_retries:
+            try:
+                response = requests.get(
+                    self.api_url, 
+                    headers={
+                        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36",
+                        "Accept": "application/json"
+                    },
+                    timeout=30
+                )
+                response.raise_for_status()
+                
+                # 解析JSON响应
+                data = response.json()
+                
+                result = {
+                    'date': None,
+                    'time': None,
+                    'nav_usd': None
+                }
+                
+                # 从JSON中提取数据
+                if 'quote' in data and 'rows' in data['quote'] and len(data['quote']['rows']) > 0:
+                    row = data['quote']['rows'][0]
+                    result['date'] = row.get('date', None)
+                    result['time'] = row.get('time', None)
+                    # values[1] 是USD净值
+                    if 'values' in row and len(row['values']) > 1:
+                        result['nav_usd'] = float(row['values'][1])
+                
+                # 转换日期和时间格式
+                if result['date'] and result['time']:
+                    try:
+                        # 解析日期格式 "03 Mar 2026"
+                        date_obj = datetime.strptime(result['date'], "%d %b %Y")
+                        # 解析时间格式 "01:34 PM"
+                        time_obj = datetime.strptime(result['time'], "%I:%M %p")
+                        # 组合日期和时间
+                        combined_datetime = datetime.combine(date_obj.date(), time_obj.time())
+                        # 格式化为统一格式
+                        result['time'] = combined_datetime.strftime("%Y-%m-%d %H:%M:%S")
+                        result['date'] = date_obj.strftime("%d-%b-%Y")
+                    except Exception as e:
+                        print(f"日期时间格式转换失败: {e}")
+                
+                # 保存到缓存
+                self._save_intraday_nav_cache(result)
+                
+                return result
+                
+            except requests.exceptions.SSLError as e:
+                retry_count += 1
+                if retry_count < max_retries:
+                    print(f"SSL连接错误，正在重试 ({retry_count}/{max_retries})...")
+                    time.sleep(2)
+                else:
+                    print(f"SSL连接错误，已达到最大重试次数: {e}")
+                    return None
+            except requests.exceptions.Timeout as e:
+                retry_count += 1
+                if retry_count < max_retries:
+                    print(f"请求超时，正在重试 ({retry_count}/{max_retries})...")
+                    time.sleep(2)
+                else:
+                    print(f"请求超时，已达到最大重试次数: {e}")
+                    return None
+            except requests.exceptions.HTTPError as e:
+                retry_count += 1
+                if retry_count < max_retries:
+                    print(f"HTTP错误 ({e.response.status_code})，正在重试 ({retry_count}/{max_retries})...")
+                    time.sleep(2)
+                else:
+                    print(f"HTTP错误，已达到最大重试次数: {e}")
+                    return None
+            except requests.exceptions.RequestException as e:
+                retry_count += 1
+                if retry_count < max_retries:
+                    print(f"网络请求错误，正在重试 ({retry_count}/{max_retries})...")
+                    time.sleep(2)
+                else:
+                    print(f"网络请求错误，已达到最大重试次数: {e}")
+                    return None
+            except (json.JSONDecodeError, KeyError, ValueError) as e:
+                print(f"JSON解析错误: {e}")
+                return None
+        
+        return None
+    
+    def _get_cached_intraday_nav(self):
+        """
+        从缓存获取实时净值数据
+        
+        当无法从网络获取数据时，尝试从缓存文件中读取之前保存的数据。
+        
+        返回:
+            dict: 包含以下键的字典:
+                - date (str): 日期
+                - time (str): 时间
+                - nav_usd (float): 实时净值（美元）
+                
+                如果缓存不存在或已过期，返回默认值。
+        """
+        try:
+            if os.path.exists(self.intraday_nav_cache_file):
+                with open(self.intraday_nav_cache_file, 'r', encoding='utf-8') as f:
+                    cache_data = json.load(f)
+                
+                # 检查缓存是否是当天的
+                today = datetime.now().strftime("%Y-%m-%d")
+                if cache_data.get('cache_date') == today:
+                    print(f"使用缓存的Intraday NAV数据 ({cache_data.get('cache_date')})")
+                    return cache_data.get('data')
+            
             return {'date': 'N/A', 'time': 'N/A', 'nav_usd': None}
+        except Exception as e:
+            print(f"读取缓存数据时出错: {e}")
+            return {'date': 'N/A', 'time': 'N/A', 'nav_usd': None}
+    
+    def _save_intraday_nav_cache(self, data):
+        """
+        保存实时净值数据到缓存
+        
+        参数:
+            data (dict): 要保存的实时净值数据
+        """
+        try:
+            today = datetime.now().strftime("%Y-%m-%d")
+            cache_data = {
+                'cache_date': today,
+                'data': data
+            }
+            with open(self.intraday_nav_cache_file, 'w', encoding='utf-8') as f:
+                json.dump(cache_data, f, ensure_ascii=False, indent=2)
+        except Exception as e:
+            print(f"保存缓存数据时出错: {e}")
     
     def get_market_price(self):
         """
@@ -688,7 +894,7 @@ class IOPVCalculator:
         运行完整计算流程
         
         执行完整的估值计算流程，包括：
-        1. 获取实时净值（Intraday NAV）
+        1. 获取实时净值（Intraday NAV）- 先尝试新API，失败则使用原方法
         2. 获取市场价格
         3. 获取最新基金净值
         4. 获取历史净值数据
@@ -704,8 +910,14 @@ class IOPVCalculator:
             >>> calculator = IOPVCalculator()
             >>> calculator.run()
         """
-        # 1. 获取实时净值
-        intraday_result = self.get_intraday_nav()
+        # 1. 获取实时净值 - 先尝试新API
+        print("正在获取实时净值...")
+        intraday_result = self.get_intraday_nav_from_api()
+        
+        # 如果新API失败，使用原来的方法
+        if intraday_result is None or intraday_result.get('nav_usd') is None:
+            print("新API获取失败，尝试使用原来的方法...")
+            intraday_result = self.get_intraday_nav()
         
         # 2. 获取市场价格
         market_price_info = self.get_market_price()
