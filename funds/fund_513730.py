@@ -13,6 +13,7 @@ import time
 from typing import Optional
 
 from core.base import BaseFund, FundData
+from core.nav_history import NavHistoryManager
 
 
 class Fund513730(BaseFund):
@@ -56,6 +57,9 @@ class Fund513730(BaseFund):
         self.latest_nav_cache_file = os.path.join(self.cache_dir, "latest_nav_cache.json")
         self.historical_nav_cache_file = os.path.join(self.cache_dir, "historical_nav_cache.json")
         self.intraday_nav_cache_file = os.path.join(self.cache_dir, "intraday_nav_cache.json")
+        
+        # 净值历史管理器
+        self.nav_history = NavHistoryManager(self.cache_dir, self.fund_code)
     
     def calculate(self) -> FundData:
         """计算估值数据"""

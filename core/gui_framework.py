@@ -142,9 +142,11 @@ class FundManagerGUI:
             text="请选择基金",
             font=("Microsoft YaHei", 16, "bold"),
             fg="#ffffff",
-            bg="#2a2a4e"
+            bg="#2a2a4e",
+            cursor="hand2"
         )
         self.title_label.pack(pady=(0, 20))
+        self.title_label.bind("<Button-1>", self._show_csv_table)
         
         # 分隔线
         separator = tk.Frame(inner_frame, height=2, bg="#4a4a6e")
@@ -245,6 +247,23 @@ class FundManagerGUI:
             height=2
         )
         self.save_btn.pack(side=tk.LEFT, padx=5, pady=5)
+        
+        # 保存历史净值按钮
+        self.save_history_btn = tk.Button(
+            button_frame,
+            text="📊 保存历史净值",
+            font=("Microsoft YaHei", 11, "bold"),
+            fg="#ffffff",
+            bg="#9b59b6",
+            activebackground="#ab69c6",
+            activeforeground="#ffffff",
+            relief=tk.FLAT,
+            cursor="hand2",
+            command=self._save_history_to_csv,
+            width=14,
+            height=2
+        )
+        self.save_history_btn.pack(side=tk.LEFT, padx=5, pady=5)
         
         # 状态标签
         self.status_label = tk.Label(
@@ -454,6 +473,156 @@ class FundManagerGUI:
             messagebox.showinfo("成功", f"数据已保存到:\n{filepath}")
         except Exception as e:
             messagebox.showerror("错误", f"保存失败: {e}")
+    
+    def _save_history_to_csv(self):
+        """保存历史净值数据到CSV"""
+        if not self.current_fund or not self.current_data:
+            messagebox.showwarning("警告", "没有数据可保存")
+            return
+        
+        try:
+            data = self.current_data
+            
+            # 1. 保存场内价格、估算实时净值和A股收盘溢价率到市场价格的日期
+            if data.market_time:
+                # 从market_time提取日期 (格式: 2026-03-04 15:00:00)
+                market_date = data.market_time.split(' ')[0]
+                
+                # 检查CSV中该日期是否已有最新基金净值数据
+                existing_record = self.current_fund.nav_history.get_record_by_date(market_date)
+                nav_premium = None
+                estimation_error = None
+                if existing_record and existing_record.get('最新基金净值(CNY)'):
+                    try:
+                        latest_nav = float(existing_record['最新基金净值(CNY)'])
+                        if data.market_price and latest_nav:
+                            nav_premium = ((data.market_price - latest_nav) / latest_nav) * 100
+                        # 计算估算误差（估算实时净值相对于最新基金净值）
+                        if data.estimated_nav and latest_nav:
+                            estimation_error = ((data.estimated_nav - latest_nav) / latest_nav) * 100
+                    except (ValueError, TypeError):
+                        pass
+                
+                self.current_fund.nav_history.add_record(
+                    date=market_date,
+                    market_price=data.market_price,
+                    estimated_nav=data.estimated_nav,
+                    latest_nav=None,
+                    historical_nav=None,
+                    a_share_premium=data.premium_discount,
+                    nav_premium=nav_premium,
+                    estimation_error=estimation_error
+                )
+            
+            # 2. 保存最新基金净值和Historical NAV到最新净值的日期
+            if data.latest_nav_date:
+                # 检查CSV中该日期是否已有场内价格数据
+                existing_record = self.current_fund.nav_history.get_record_by_date(data.latest_nav_date)
+                nav_premium = None
+                estimation_error = None
+                if existing_record and existing_record.get('场内价格(CNY)'):
+                    try:
+                        market_price = float(existing_record['场内价格(CNY)'])
+                        if market_price and data.latest_nav:
+                            nav_premium = ((market_price - data.latest_nav) / data.latest_nav) * 100
+                    except (ValueError, TypeError):
+                        pass
+                
+                # 检查CSV中该日期是否已有估算实时净值数据
+                if existing_record and existing_record.get('估算实时净值(CNY)'):
+                    try:
+                        estimated_nav = float(existing_record['估算实时净值(CNY)'])
+                        if estimated_nav and data.latest_nav:
+                            estimation_error = ((estimated_nav - data.latest_nav) / data.latest_nav) * 100
+                    except (ValueError, TypeError):
+                        pass
+                
+                self.current_fund.nav_history.add_record(
+                    date=data.latest_nav_date,
+                    market_price=None,
+                    estimated_nav=None,
+                    latest_nav=data.latest_nav,
+                    historical_nav=data.historical_nav,
+                    a_share_premium=None,
+                    nav_premium=nav_premium,
+                    estimation_error=estimation_error
+                )
+            
+            csv_path = os.path.join(self.current_fund.get_cache_dir(), "nav_history.csv")
+            self.status_label.config(text=f"📊 历史净值已保存")
+            messagebox.showinfo("成功", f"历史净值数据已保存到:\n{csv_path}")
+        except Exception as e:
+            messagebox.showerror("错误", f"保存失败: {e}")
+    
+    def _show_csv_table(self, event=None):
+        """显示CSV表格窗口"""
+        if not self.current_fund:
+            messagebox.showwarning("警告", "请先选择基金")
+            return
+        
+        try:
+            csv_path = os.path.join(self.current_fund.get_cache_dir(), "nav_history.csv")
+            
+            if not os.path.exists(csv_path):
+                messagebox.showwarning("警告", "CSV文件不存在，请先保存历史净值数据")
+                return
+            
+            # 创建新窗口
+            table_window = tk.Toplevel(self.root)
+            table_window.title(f"{self.current_fund.fund_code} - {self.current_fund.fund_name} - 历史净值")
+            table_window.geometry("1200x600")
+            table_window.configure(bg="#1a1a2e")
+            
+            # 创建表格框架
+            table_frame = tk.Frame(table_window, bg="#2a2a4e")
+            table_frame.pack(fill=tk.BOTH, expand=True, padx=10, pady=10)
+            
+            # 创建Treeview
+            from tkinter import ttk
+            
+            # 定义列
+            columns = ['日期', '场内价格(CNY)', '估算实时净值(CNY)', '最新基金净值(CNY)', 
+                      'Historical NAV(USD)', 'A股收盘溢价率(%)', '净值溢价率(%)', '估算误差(%)', '更新时间']
+            
+            tree = ttk.Treeview(table_frame, columns=columns, show='headings', height=20)
+            
+            # 设置列标题
+            for col in columns:
+                tree.heading(col, text=col)
+                tree.column(col, width=120, anchor=tk.CENTER)
+            
+            # 添加滚动条
+            scrollbar_y = ttk.Scrollbar(table_frame, orient=tk.VERTICAL, command=tree.yview)
+            scrollbar_x = ttk.Scrollbar(table_frame, orient=tk.HORIZONTAL, command=tree.xview)
+            tree.configure(yscrollcommand=scrollbar_y.set, xscrollcommand=scrollbar_x.set)
+            
+            # 读取CSV文件
+            import csv
+            with open(csv_path, 'r', encoding='utf-8') as f:
+                reader = csv.reader(f)
+                next(reader)  # 跳过标题行
+                for row in reader:
+                    tree.insert('', tk.END, values=row)
+            
+            # 布局
+            tree.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
+            scrollbar_y.pack(side=tk.RIGHT, fill=tk.Y)
+            
+            # 设置样式
+            style = ttk.Style()
+            style.theme_use("clam")
+            style.configure("Treeview", 
+                          background="#2a2a4e",
+                          foreground="#ffffff",
+                          fieldbackground="#2a2a4e",
+                          font=("Microsoft YaHei", 10))
+            style.configure("Treeview.Heading", 
+                          background="#4a4a6e",
+                          foreground="#ffffff",
+                          font=("Microsoft YaHei", 10, "bold"))
+            
+        except Exception as e:
+            messagebox.showerror("错误", f"显示表格失败: {e}")
     
     def _on_closing(self):
         """窗口关闭事件"""

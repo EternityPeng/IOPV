@@ -10,6 +10,7 @@ import time
 from typing import Optional
 
 from core.base import BaseFund, FundData
+from core.nav_history import NavHistoryManager
 
 
 class Fund159687(BaseFund):
@@ -53,6 +54,9 @@ class Fund159687(BaseFund):
         self.latest_nav_cache_file = os.path.join(self.cache_dir, "latest_nav_cache.json")
         self.historical_nav_cache_file = os.path.join(self.cache_dir, "historical_nav_cache.json")
         self.intraday_nav_cache_file = os.path.join(self.cache_dir, "intraday_nav_cache.json")
+        
+        # 净值历史管理器
+        self.nav_history = NavHistoryManager(self.cache_dir, self.fund_code)
     
     def calculate(self) -> FundData:
         """计算估值数据"""
@@ -68,7 +72,7 @@ class Fund159687(BaseFund):
         latest_nav = self._get_latest_nav()
         
         # 4. 获取Historical NAV
-        target_date = latest_nav.get('date')
+        target_date = latest_nav.get('date') if latest_nav else None
         historical_nav = self._get_historical_nav_by_date(target_date) if target_date else None
         
         # 5. 计算NAV涨跌幅

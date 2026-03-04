@@ -5,5 +5,6 @@ IOPV 核心模块
 
 from .base import BaseFund, FundData
 from .utils import ensure_dir, format_time, format_number
+from .nav_history import NavHistoryManager
 
-__all__ = ['BaseFund', 'FundData', 'ensure_dir', 'format_time', 'format_number']
+__all__ = ['BaseFund', 'FundData', 'ensure_dir', 'format_time', 'format_number', 'NavHistoryManager']
