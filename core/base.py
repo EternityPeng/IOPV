@@ -27,6 +27,8 @@ class FundData:
     historical_nav: Optional[float] = None
     historical_nav_date: Optional[str] = None
     nav_change_pct: Optional[float] = None
+    common_date_nav: Optional[float] = None
+    common_date: Optional[str] = None
     extra_data: Dict[str, Any] = field(default_factory=dict)
     
     def to_dict(self) -> Dict[str, Any]:
@@ -46,6 +48,8 @@ class FundData:
             'historical_nav': self.historical_nav,
             'historical_nav_date': self.historical_nav_date,
             'nav_change_pct': self.nav_change_pct,
+            'common_date_nav': self.common_date_nav,
+            'common_date': self.common_date,
             'extra_data': self.extra_data
         }
     
@@ -218,6 +222,12 @@ class BaseFund(ABC):
             if data.historical_nav_date:
                 nav_str += f" (日期: {data.historical_nav_date})"
             print("│ {:<20}  {:^54} ".format("Historical NAV", nav_str))
+        
+        if data.common_date_nav is not None:
+            nav_str = f"{data.common_date_nav} CNY"
+            if data.common_date:
+                nav_str += f" (日期: {data.common_date})"
+            print("│ {:<20}  {:^54} ".format("共同日期净值", nav_str))
         
         if data.nav_change_pct is not None:
             change_str = f"{data.nav_change_pct:.2f}%"

@@ -74,11 +74,14 @@ class Fund513730(BaseFund):
         # 3. 获取最新基金净值
         latest_nav = self._get_latest_nav()
         
-        # 4. 获取Historical NAV
-        target_date = latest_nav.get('date') if latest_nav else None
+        # 4. 获取共同日期净值
+        common_date_result = self._get_common_date_nav()
+        
+        # 5. 获取Historical NAV（使用共同日期）
+        target_date = common_date_result.get('date') if common_date_result else None
         historical_nav = self._get_historical_nav_by_date(target_date) if target_date else None
         
-        # 5. 计算NAV涨跌幅
+        # 6. 计算NAV涨跌幅
         nav_change_result = None
         if historical_nav and intraday_result and intraday_result.get('nav_usd'):
             nav_change_result = self._calculate_nav_change(
@@ -86,11 +89,11 @@ class Fund513730(BaseFund):
                 intraday_result.get('nav_usd')
             )
         
-        # 6. 估算实时净值
+        # 7. 估算实时净值
         estimated_nav = None
         premium_discount = None
-        if nav_change_result and latest_nav and latest_nav.get('nav'):
-            estimated_nav = latest_nav['nav'] * (1 + nav_change_result['change_pct'] / 100)
+        if nav_change_result and common_date_result and common_date_result.get('nav'):
+            estimated_nav = common_date_result['nav'] * (1 + nav_change_result['change_pct'] / 100)
             if market_price_info and market_price_info.get('price'):
                 premium_discount = ((market_price_info['price'] - estimated_nav) / estimated_nav) * 100
         
@@ -109,8 +112,72 @@ class Fund513730(BaseFund):
             intraday_nav_time=intraday_result.get('time') if intraday_result else None,
             historical_nav=historical_nav.get('nav') if historical_nav else None,
             historical_nav_date=historical_nav.get('date') if historical_nav else None,
-            nav_change_pct=nav_change_result.get('change_pct') if nav_change_result else None
+            nav_change_pct=nav_change_result.get('change_pct') if nav_change_result else None,
+            common_date_nav=common_date_result.get('nav') if common_date_result else None,
+            common_date=common_date_result.get('date') if common_date_result else None
         )
+    
+    def _get_common_date_nav(self) -> Optional[dict]:
+        """获取共同日期净值"""
+        try:
+            # 读取A股历史净值缓存
+            a_historical_nav_file = os.path.join(self.cache_dir, "a_historical_nav_cache.json")
+            if not os.path.exists(a_historical_nav_file):
+                print("A股历史净值缓存文件不存在")
+                return None
+            
+            with open(a_historical_nav_file, 'r', encoding='utf-8') as f:
+                a_cache_data = json.load(f)
+            a_historical_nav = a_cache_data.get('data', {})
+            
+            # 读取官网历史净值缓存
+            if not os.path.exists(self.historical_nav_cache_file):
+                print("官网历史净值缓存文件不存在")
+                return None
+            
+            with open(self.historical_nav_cache_file, 'r', encoding='utf-8') as f:
+                official_cache_data = json.load(f)
+            
+            official_dates = official_cache_data.get('dates', [])
+            official_nav_data = official_cache_data.get('nav_data', [])
+            
+            # 获取最近15日的A股净值日期
+            from datetime import datetime, timedelta
+            today = datetime.now()
+            recent_15_dates = []
+            for i in range(15):
+                date = today - timedelta(days=i)
+                recent_15_dates.append(date.strftime("%Y-%m-%d"))
+            
+            # 找到两者日期一致的且离现在的日期最近的日期
+            for date in recent_15_dates:
+                # 检查A股历史净值中是否有该日期
+                if date in a_historical_nav:
+                    # 检查官网历史净值中是否有该日期
+                    # 需要将日期格式转换为官网格式 (YYYY-MM-DD -> DD Mon,YYYY)
+                    try:
+                        date_obj = datetime.strptime(date, "%Y-%m-%d")
+                        official_date_format = date_obj.strftime("%d %b,%Y")
+                        
+                        if official_date_format in official_dates:
+                            idx = official_dates.index(official_date_format)
+                            official_nav = official_nav_data[idx]
+                            
+                            return {
+                                'date': date,
+                                'nav': a_historical_nav[date],
+                                'official_nav': official_nav
+                            }
+                    except Exception as e:
+                        print(f"日期格式转换错误: {e}")
+                        continue
+            
+            print("未找到共同日期的净值数据")
+            return None
+            
+        except Exception as e:
+            print(f"获取共同日期净值失败: {e}")
+            return None
     
     def _get_intraday_nav_from_api(self) -> Optional[dict]:
         """从ICE API获取实时净值"""
@@ -264,11 +331,34 @@ class Fund513730(BaseFund):
             with open(self.latest_nav_cache_file, 'w', encoding='utf-8') as f:
                 json.dump(cache_data, f, ensure_ascii=False, indent=2)
             
+            # 保存全部A股历史净值到缓存
+            self._save_a_historical_nav(df)
+            
             return result
         except Exception as e:
             print(f"获取最新净值失败: {e}")
         
         return None
+    
+    def _save_a_historical_nav(self, df):
+        """保存A股历史净值到缓存"""
+        try:
+            a_historical_nav = {}
+            for _, row in df.iterrows():
+                date_str = str(row['净值日期'])
+                nav = float(row['单位净值'])
+                a_historical_nav[date_str] = nav
+            
+            cache_data = {
+                'cache_date': datetime.now().strftime("%Y-%m-%d"),
+                'data': a_historical_nav
+            }
+            
+            a_historical_nav_file = os.path.join(self.cache_dir, "a_historical_nav_cache.json")
+            with open(a_historical_nav_file, 'w', encoding='utf-8') as f:
+                json.dump(cache_data, f, ensure_ascii=False, indent=2)
+        except Exception as e:
+            print(f"保存A股历史净值失败: {e}")
     
     def _get_historical_nav_by_date(self, target_date: str) -> Optional[dict]:
         """获取指定日期的历史净值"""
@@ -382,21 +472,7 @@ class Fund513730(BaseFund):
                 except:
                     pass
             
-            # 如果未找到匹配日期，返回最新可用的历史净值
-            if dates and nav_data:
-                try:
-                    date_obj = datetime.strptime(dates[-1], "%d %b,%Y")
-                    formatted_date = date_obj.strftime("%Y-%m-%d")
-                    return {
-                        'date': formatted_date,
-                        'nav': nav_data[-1]
-                    }
-                except:
-                    return {
-                        'date': dates[-1],
-                        'nav': nav_data[-1]
-                    }
-            
+            # 如果未找到匹配日期，返回None
             return None
                 
         except Exception as e:

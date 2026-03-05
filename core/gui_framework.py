@@ -161,6 +161,7 @@ class FundManagerGUI:
             ("estimated_nav", "💰 估算净值", "#9c27b0"),
             ("premium_discount", "📉 溢价率", "#f44336"),
             ("latest_nav", "📋 最新净值", "#00bcd4"),
+            ("common_date_nav", "🔗 共同日期净值", "#e91e63"),
             ("intraday_nav", "🌐 Intraday NAV", "#ff5722"),
             ("historical_nav", "📜 Historical NAV", "#795548"),
             ("nav_change", "📈 NAV涨跌幅", "#607d8b")
@@ -395,6 +396,15 @@ class FundManagerGUI:
             self.labels["latest_nav"].config(text=nav_text)
         else:
             self.labels["latest_nav"].config(text="--")
+        
+        # 共同日期净值
+        if data.common_date_nav is not None:
+            nav_text = f"{data.common_date_nav} CNY"
+            if data.common_date:
+                nav_text += f" ({data.common_date})"
+            self.labels["common_date_nav"].config(text=nav_text)
+        else:
+            self.labels["common_date_nav"].config(text="--")
         
         # Intraday NAV
         if data.intraday_nav is not None:
