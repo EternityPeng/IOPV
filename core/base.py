@@ -8,6 +8,16 @@ from dataclasses import dataclass, field
 from typing import Optional, Dict, Any, List
 from datetime import datetime
 import os
+import threading
+
+# 全局打印锁，用于多线程同步输出
+_print_lock = threading.Lock()
+
+
+def safe_print(*args, **kwargs):
+    """线程安全的打印函数"""
+    with _print_lock:
+        print(*args, **kwargs)
 
 
 @dataclass
@@ -29,6 +39,9 @@ class FundData:
     nav_change_pct: Optional[float] = None
     common_date_nav: Optional[float] = None
     common_date: Optional[str] = None
+    usd_cny_rate: Optional[float] = None
+    usd_cny_change_pct: Optional[float] = None
+    usd_cny_rate_on_common_date: Optional[float] = None
     extra_data: Dict[str, Any] = field(default_factory=dict)
     
     def to_dict(self) -> Dict[str, Any]:
@@ -50,6 +63,9 @@ class FundData:
             'nav_change_pct': self.nav_change_pct,
             'common_date_nav': self.common_date_nav,
             'common_date': self.common_date,
+            'usd_cny_rate': self.usd_cny_rate,
+            'usd_cny_change_pct': self.usd_cny_change_pct,
+            'usd_cny_rate_on_common_date': self.usd_cny_rate_on_common_date,
             'extra_data': self.extra_data
         }
     
@@ -60,7 +76,9 @@ class FundData:
             'fund_code', 'fund_name', 'market_price', 'market_change_pct',
             'market_time', 'estimated_nav', 'premium_discount', 'latest_nav',
             'latest_nav_date', 'intraday_nav', 'intraday_nav_time',
-            'historical_nav', 'historical_nav_date', 'nav_change_pct', 'extra_data'
+            'historical_nav', 'historical_nav_date', 'nav_change_pct',
+            'common_date_nav', 'common_date', 'usd_cny_rate', 'usd_cny_change_pct', 
+            'usd_cny_rate_on_common_date', 'extra_data'
         }
         filtered_data = {k: v for k, v in data.items() if k in known_fields}
         extra_data = {k: v for k, v in data.items() if k not in known_fields}
@@ -181,7 +199,7 @@ class BaseFund(ABC):
         """
         print("\n")
         print("┌" + "─" * 78)
-        print(f"│ {self.fund_code} {self.fund_name:^68} │")
+        print(f"│ {self.fund_code} {self.fund_name:^68} ")
         print("├" + "─" * 78 + "")
         print("│ {:<20} │ {:^54} ".format("项目", "数值"))
         print("├" + "─" * 78)
@@ -232,6 +250,16 @@ class BaseFund(ABC):
         if data.nav_change_pct is not None:
             change_str = f"{data.nav_change_pct:.2f}%"
             print("│ {:<20}  {:^54} ".format("NAV涨跌幅", change_str))
+        
+        if data.usd_cny_rate is not None:
+            rate_str = f"{data.usd_cny_rate:.4f}"
+            if data.usd_cny_change_pct is not None and data.usd_cny_rate_on_common_date is not None and data.common_date:
+                rate_str += f" (涨跌幅: {data.usd_cny_change_pct:.2f}%"
+                rate_str += f", 共同日期: {data.common_date}"
+                rate_str += f", 当时汇率: {data.usd_cny_rate_on_common_date:.4f})"
+            elif data.usd_cny_change_pct is not None:
+                rate_str += f" (涨跌幅: {data.usd_cny_change_pct:.2f}%)"
+            print("│ {:<20}  {:^54} ".format("美元/人民币汇率", rate_str))
         
         print("└" + "─" * 78 + "")
         

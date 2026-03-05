@@ -81,7 +81,34 @@ class Fund513730(BaseFund):
         target_date = common_date_result.get('date') if common_date_result else None
         historical_nav = self._get_historical_nav_by_date(target_date) if target_date else None
         
-        # 6. 计算NAV涨跌幅
+        # 6. 获取汇率数据
+        usd_cny_rate = None
+        usd_cny_change_pct = None
+        usd_cny_rate_on_common_date = None
+        try:
+            from core.exchange_rate import get_usd_cny_latest_rate, get_usd_cny_rate_by_date
+            
+            # 获取最新汇率
+            rate_result = get_usd_cny_latest_rate()
+            if rate_result.get('success'):
+                usd_cny_rate = rate_result.get('rate')
+                
+                # 如果有共同日期，获取共同日期的汇率，计算汇率涨跌幅
+                if common_date_result and common_date_result.get('date'):
+                    common_date = common_date_result['date']
+                    
+                    # common_date 已经是 'YYYY-MM-DD' 格式
+                    
+                    # 获取共同日期的汇率
+                    usd_cny_rate_on_common_date = get_usd_cny_rate_by_date(common_date)
+                    
+                    if usd_cny_rate_on_common_date and usd_cny_rate:
+                        # 计算汇率涨跌幅
+                        usd_cny_change_pct = ((usd_cny_rate - usd_cny_rate_on_common_date) / usd_cny_rate_on_common_date) * 100
+        except Exception as e:
+            print(f"获取美元兑人民币汇率失败: {e}")
+        
+        # 7. 计算NAV涨跌幅
         nav_change_result = None
         if historical_nav and intraday_result and intraday_result.get('nav_usd'):
             nav_change_result = self._calculate_nav_change(
@@ -89,11 +116,21 @@ class Fund513730(BaseFund):
                 intraday_result.get('nav_usd')
             )
         
-        # 7. 估算实时净值
+        # 8. 估算实时净值（考虑汇率因素）
         estimated_nav = None
         premium_discount = None
         if nav_change_result and common_date_result and common_date_result.get('nav'):
-            estimated_nav = common_date_result['nav'] * (1 + nav_change_result['change_pct'] / 100)
+            # NAV涨跌幅（美元计价）
+            nav_change_pct = nav_change_result['change_pct'] / 100
+            
+            # 如果有汇率涨跌幅，需要考虑汇率因素
+            # 估算实时净值 = 共同日期的A股净值 * (1 + NAV涨跌幅) * (1 + 汇率涨跌幅)
+            if usd_cny_change_pct is not None:
+                exchange_rate_change = usd_cny_change_pct / 100
+                estimated_nav = common_date_result['nav'] * (1 + nav_change_pct) * (1 + exchange_rate_change)
+            else:
+                estimated_nav = common_date_result['nav'] * (1 + nav_change_pct)
+            
             if market_price_info and market_price_info.get('price'):
                 premium_discount = ((market_price_info['price'] - estimated_nav) / estimated_nav) * 100
         
@@ -114,7 +151,10 @@ class Fund513730(BaseFund):
             historical_nav_date=historical_nav.get('date') if historical_nav else None,
             nav_change_pct=nav_change_result.get('change_pct') if nav_change_result else None,
             common_date_nav=common_date_result.get('nav') if common_date_result else None,
-            common_date=common_date_result.get('date') if common_date_result else None
+            common_date=common_date_result.get('date') if common_date_result else None,
+            usd_cny_rate=usd_cny_rate,
+            usd_cny_change_pct=usd_cny_change_pct,
+            usd_cny_rate_on_common_date=usd_cny_rate_on_common_date
         )
     
     def _get_common_date_nav(self) -> Optional[dict]:
