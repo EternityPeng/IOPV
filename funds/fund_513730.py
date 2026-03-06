@@ -170,9 +170,21 @@ class Fund513730(BaseFund):
                 a_cache_data = json.load(f)
             a_historical_nav = a_cache_data.get('data', {})
             
-            # 读取官网历史净值缓存
+            # 检查官网历史净值缓存是否存在，如果不存在则获取
             if not os.path.exists(self.historical_nav_cache_file):
-                print("官网历史净值缓存文件不存在")
+                print("官网历史净值缓存文件不存在，正在获取...")
+                # 获取最近15天的日期，尝试获取历史净值
+                from datetime import datetime, timedelta
+                today = datetime.now()
+                for i in range(15):
+                    target_date = (today - timedelta(days=i)).strftime("%Y-%m-%d")
+                    result = self._get_historical_nav_by_date(target_date)
+                    if result:
+                        break
+            
+            # 再次检查缓存是否存在
+            if not os.path.exists(self.historical_nav_cache_file):
+                print("获取官网历史净值失败")
                 return None
             
             with open(self.historical_nav_cache_file, 'r', encoding='utf-8') as f:
@@ -403,92 +415,96 @@ class Fund513730(BaseFund):
     def _get_historical_nav_by_date(self, target_date: str) -> Optional[dict]:
         """获取指定日期的历史净值"""
         try:
+            from core.base import get_browser_lock
+            
             today = datetime.now().strftime("%Y-%m-%d")
             
+            # 先检查缓存是否存在
+            cache_data = None
             if os.path.exists(self.historical_nav_cache_file):
                 with open(self.historical_nav_cache_file, 'r', encoding='utf-8') as f:
                     cache_data = json.load(f)
-                
-                if cache_data.get('cache_date') == today:
-                    dates = cache_data.get('dates', [])
-                    nav_data = cache_data.get('nav_data', [])
-                else:
-                    cache_data = None
+            
+            # 检查缓存是否是今天的
+            dates = []
+            nav_data = []
+            
+            if cache_data and cache_data.get('cache_date') == today:
+                dates = cache_data.get('dates', [])
+                nav_data = cache_data.get('nav_data', [])
             else:
-                cache_data = None
-            
-            if not cache_data:
-                from DrissionPage import ChromiumPage
-                
-                page = ChromiumPage()
-                page.get(self.main_url)
-                page.wait(2)
-                
-                # 处理cookie弹窗
-                try:
-                    agree_btn = page.ele("#StateAccept", timeout=3)
-                    if agree_btn:
-                        agree_btn.click()
-                        page.wait(1)
-                except:
-                    pass
-                
-                # 滚动到图表位置
-                page.run_js("window.scrollTo(0, 1500)")
-                page.wait(1)
-                
-                # 点击Historical NAVs标签
-                historical_tab = page.ele("text:Historical NAVs", timeout=5)
-                if historical_tab:
-                    historical_tab.click()
+                # 缓存不是今天的，需要重新获取
+                # 使用浏览器锁保护浏览器操作
+                with get_browser_lock():
+                    print(f"[{self.fund_code}] 正在获取Historical NAV数据...")
+                    
+                    from DrissionPage import ChromiumPage
+                    
+                    page = ChromiumPage()
+                    page.get(self.main_url)
                     page.wait(2)
-                
-                # 从echarts图表提取数据
-                chart_data = page.run_js("""
-                    var chartDom = document.getElementById('PerformChart');
-                    if (chartDom && typeof echarts !== 'undefined') {
-                        var chart = echarts.getInstanceByDom(chartDom);
-                        if (chart) {
-                            var option = chart.getOption();
-                            return JSON.stringify(option);
+                    
+                    # 处理cookie弹窗
+                    try:
+                        agree_btn = page.ele("#StateAccept", timeout=3)
+                        if agree_btn:
+                            agree_btn.click()
+                            page.wait(1)
+                    except:
+                        pass
+                    
+                    # 滚动到图表位置
+                    page.run_js("window.scrollTo(0, 1500)")
+                    page.wait(1)
+                    
+                    # 点击Historical NAVs标签
+                    historical_tab = page.ele("text:Historical NAVs", timeout=5)
+                    if historical_tab:
+                        historical_tab.click()
+                        page.wait(2)
+                    
+                    # 从echarts图表提取数据
+                    chart_data = page.run_js("""
+                        var chartDom = document.getElementById('PerformChart');
+                        if (chartDom && typeof echarts !== 'undefined') {
+                            var chart = echarts.getInstanceByDom(chartDom);
+                            if (chart) {
+                                var option = chart.getOption();
+                                return JSON.stringify(option);
+                            }
                         }
-                    }
-                    return null;
-                """)
-                
-                page.quit()
-                
-                if chart_data:
-                    data = json.loads(chart_data)
+                        return null;
+                    """)
                     
-                    dates = []
-                    nav_data = []
+                    page.quit()
                     
-                    # 提取日期数据
-                    if 'xAxis' in data:
-                        for xa in data['xAxis']:
-                            if 'data' in xa:
-                                dates = xa['data']
-                    
-                    # 提取净值数据
-                    if 'series' in data:
-                        for s in data['series']:
-                            if 'data' in s and len(s.get('data', [])) > 0:
-                                nav_data = s.get('data', [])
-                                break
-                    
-                    # 保存到缓存
-                    cache_data = {
-                        'cache_date': today,
-                        'dates': dates,
-                        'nav_data': nav_data
-                    }
-                    
-                    with open(self.historical_nav_cache_file, 'w', encoding='utf-8') as f:
-                        json.dump(cache_data, f, ensure_ascii=False)
-            
-            dates = cache_data.get('dates', [])
-            nav_data = cache_data.get('nav_data', [])
+                    if chart_data:
+                        data = json.loads(chart_data)
+                        
+                        # 提取日期数据
+                        if 'xAxis' in data:
+                            for xa in data['xAxis']:
+                                if 'data' in xa:
+                                    dates = xa['data']
+                        
+                        # 提取净值数据
+                        if 'series' in data:
+                            for s in data['series']:
+                                if 'data' in s and len(s.get('data', [])) > 0:
+                                    nav_data = s.get('data', [])
+                                    break
+                        
+                        # 保存到缓存
+                        cache_data = {
+                            'cache_date': today,
+                            'dates': dates,
+                            'nav_data': nav_data
+                        }
+                        
+                        with open(self.historical_nav_cache_file, 'w', encoding='utf-8') as f:
+                            json.dump(cache_data, f, ensure_ascii=False)
+                        
+                        print(f"[{self.fund_code}] Historical NAV数据已更新")
             
             # 解析目标日期
             target_date_obj = None

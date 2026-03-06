@@ -13,11 +13,19 @@ import threading
 # 全局打印锁，用于多线程同步输出
 _print_lock = threading.Lock()
 
+# 全局浏览器锁，用于保护浏览器操作（爬取数据时需要加锁）
+_browser_lock = threading.Lock()
+
 
 def safe_print(*args, **kwargs):
     """线程安全的打印函数"""
     with _print_lock:
         print(*args, **kwargs)
+
+
+def get_browser_lock():
+    """获取全局浏览器锁"""
+    return _browser_lock
 
 
 @dataclass
