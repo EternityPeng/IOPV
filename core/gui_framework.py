@@ -35,9 +35,22 @@ class FundManagerGUI:
         self.auto_refresh_interval = 30000  # 30秒
         self.auto_refresh_id = None
         
+        # 定时任务相关
+        self.scheduled_task_id = None
+        self.last_close_save_date = None
+        self.last_next_day_save_date = None
+        
+        # 测试模式：固定触发时间（程序启动后2分钟和3分钟）
+        self.test_close_time = None
+        self.test_next_day_time = None
+        self._init_test_schedule_times()
+        
         self._setup_window()
         self._setup_styles()
         self._setup_ui()
+        
+        # 启动定时任务检查
+        self._start_scheduled_task_check()
         
         # 自动刷新数据
         self._refresh_all_data()
@@ -252,6 +265,22 @@ class FundManagerGUI:
             height=2
         )
         self.save_history_btn.pack(side=tk.LEFT, padx=5, pady=5)
+        
+        self.test_schedule_btn = tk.Button(
+            button_frame,
+            text="⏰ 测试定时任务",
+            font=("Microsoft YaHei", 11, "bold"),
+            fg="#ffffff",
+            bg="#e91e63",
+            activebackground="#f92e73",
+            activeforeground="#ffffff",
+            relief=tk.FLAT,
+            cursor="hand2",
+            command=self._test_scheduled_task,
+            width=14,
+            height=2
+        )
+        self.test_schedule_btn.pack(side=tk.LEFT, padx=5, pady=5)
         
         self.test_btn = tk.Button(
             button_frame,
@@ -526,12 +555,9 @@ class FundManagerGUI:
             fund.nav_history.add_record(
                 date=market_date,
                 market_price=data.market_price,
-                estimated_nav=data.estimated_nav,
+                close_estimated_nav=data.estimated_nav,
                 latest_nav=None,
-                historical_nav=None,
-                a_share_premium=data.premium_discount,
-                nav_premium=nav_premium,
-                estimation_error=estimation_error
+                historical_nav=None
             )
         
         if data.latest_nav_date:
@@ -548,12 +574,9 @@ class FundManagerGUI:
             fund.nav_history.add_record(
                 date=data.latest_nav_date,
                 market_price=None,
-                estimated_nav=None,
+                close_estimated_nav=None,
                 latest_nav=data.latest_nav,
-                historical_nav=data.historical_nav,
-                a_share_premium=a_share_premium,
-                nav_premium=None,
-                estimation_error=None
+                historical_nav=data.historical_nav
             )
     
     def _show_csv_table(self, fund_code: str):
@@ -610,10 +633,119 @@ class FundManagerGUI:
         except Exception as e:
             messagebox.showerror("错误", f"显示表格失败: {e}")
     
+    def _init_test_schedule_times(self):
+        """初始化测试模式的固定触发时间"""
+        from datetime import timedelta
+        now = datetime.now()
+        self.test_close_time = (now + timedelta(minutes=2)).strftime("%H:%M")
+        self.test_next_day_time = (now + timedelta(minutes=3)).strftime("%H:%M")
+        print(f"[测试模式] 收盘触发时间: {self.test_close_time}, 次日触发时间: {self.test_next_day_time}")
+    
+    def _start_scheduled_task_check(self):
+        """启动定时任务检查（每分钟检查一次）"""
+        self._check_scheduled_tasks()
+        self.scheduled_task_id = self.root.after(60000, self._start_scheduled_task_check)
+    
+    def _check_scheduled_tasks(self):
+        """检查是否需要执行定时任务"""
+        now = datetime.now()
+        current_time = now.strftime("%H:%M")
+        current_date = now.strftime("%Y-%m-%d")
+        
+        # ===== 测试模式 =====
+        # 使用固定的触发时间（程序启动时计算好的）
+        print(f"[定时检查] 当前时间: {current_time}, 收盘触发时间: {self.test_close_time}, 次日触发时间: {self.test_next_day_time}")
+        
+        # 测试收盘保存（固定时间）
+        if current_time == self.test_close_time and self.last_close_save_date != current_date:
+            print(f"[定时任务-测试] {self.test_close_time} 收盘保存数据...")
+            self._save_close_data()
+            self.last_close_save_date = current_date
+        
+        # 测试次日保存（固定时间）
+        if current_time == self.test_next_day_time and self.last_next_day_save_date != current_date:
+            print(f"[定时任务-测试] {self.test_next_day_time} 次日保存数据...")
+            self._save_next_day_estimate()
+            self.last_next_day_save_date = current_date
+        
+        # ===== 正式模式（注释掉测试模式后使用）=====
+        # # 15:00 收盘时保存数据
+        # if current_time == "15:00" and self.last_close_save_date != current_date:
+        #     print(f"[定时任务] 15:00 收盘保存数据...")
+        #     self._save_close_data()
+        #     self.last_close_save_date = current_date
+        # 
+        # # 05:00 次日5点保存估算净值
+        # if current_time == "05:00" and self.last_next_day_save_date != current_date:
+        #     print(f"[定时任务] 05:00 保存次日估算净值...")
+        #     self._save_next_day_estimate()
+        #     self.last_next_day_save_date = current_date
+        # ===========================================
+    
+    def _save_close_data(self):
+        """收盘时保存数据（15:00）"""
+        for fund_code, fund in self.funds.items():
+            try:
+                data = fund.calculate()
+                if data and data.market_price and data.estimated_nav:
+                    market_date = datetime.now().strftime("%Y-%m-%d")
+                    fund.nav_history.add_record(
+                        date=market_date,
+                        market_price=data.market_price,
+                        close_estimated_nav=data.estimated_nav
+                    )
+                    print(f"[收盘保存] {fund_code}: 价格={data.market_price}, 估算净值={data.estimated_nav}")
+            except Exception as e:
+                print(f"[收盘保存] {fund_code} 保存失败: {e}")
+        
+        self.status_label.config(text="📅 15:00 收盘数据已保存")
+    
+    def _save_next_day_estimate(self):
+        """次日5点保存估算净值"""
+        for fund_code, fund in self.funds.items():
+            try:
+                data = fund.calculate()
+                if data and data.estimated_nav:
+                    # 保存到前一天的记录（因为是次日5点）
+                    from datetime import timedelta
+                    yesterday = (datetime.now() - timedelta(days=1)).strftime("%Y-%m-%d")
+                    fund.nav_history.add_record(
+                        date=yesterday,
+                        next_day_estimated_nav=data.estimated_nav
+                    )
+                    print(f"[次日5点保存] {fund_code}: 估算净值={data.estimated_nav}")
+            except Exception as e:
+                print(f"[次日5点保存] {fund_code} 保存失败: {e}")
+        
+        self.status_label.config(text="📅 05:00 次日估算净值已保存")
+    
+    def _test_scheduled_task(self):
+        """测试定时任务功能"""
+        print("\n" + "="*50)
+        print("[测试模式] 手动触发定时任务...")
+        print("="*50)
+        
+        # 测试收盘保存
+        print("\n[测试] 模拟 15:00 收盘保存...")
+        self._save_close_data()
+        
+        # 测试次日5点保存
+        print("\n[测试] 模拟 05:00 次日保存...")
+        self._save_next_day_estimate()
+        
+        print("\n" + "="*50)
+        print("[测试完成] 请检查CSV文件是否正确保存数据")
+        print("="*50 + "\n")
+        
+        messagebox.showinfo("测试完成", "定时任务测试完成！\n请检查控制台输出和CSV文件。")
+    
     def _on_closing(self):
         """窗口关闭事件"""
         if self.auto_refresh_id:
             self.root.after_cancel(self.auto_refresh_id)
+        
+        if self.scheduled_task_id:
+            self.root.after_cancel(self.scheduled_task_id)
         
         for fund_code, data in self.fund_data.items():
             if data:
