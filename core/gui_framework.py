@@ -638,7 +638,7 @@ class FundManagerGUI:
         from datetime import timedelta
         now = datetime.now()
         self.test_close_time = (now + timedelta(minutes=2)).strftime("%H:%M")
-        self.test_next_day_time = (now + timedelta(minutes=3)).strftime("%H:%M")
+        self.test_next_day_time = (now + timedelta(minutes=4)).strftime("%H:%M")
         print(f"[测试模式] 收盘触发时间: {self.test_close_time}, 次日触发时间: {self.test_next_day_time}")
     
     def _start_scheduled_task_check(self):
@@ -656,17 +656,21 @@ class FundManagerGUI:
         # 使用固定的触发时间（程序启动时计算好的）
         print(f"[定时检查] 当前时间: {current_time}, 收盘触发时间: {self.test_close_time}, 次日触发时间: {self.test_next_day_time}")
         
-        # 测试收盘保存（固定时间）
-        if current_time == self.test_close_time and self.last_close_save_date != current_date:
-            print(f"[定时任务-测试] {self.test_close_time} 收盘保存数据...")
+        # 测试收盘保存（当前时间 >= 触发时间 且 今天还没执行过）
+        if self.test_close_time and current_time >= self.test_close_time and self.last_close_save_date != current_date:
+            print(f"[定时任务-测试] {current_time} >= {self.test_close_time} 收盘保存数据...")
             self._save_close_data()
             self.last_close_save_date = current_date
+            # 收盘保存后，清除触发时间，避免重复触发
+            self.test_close_time = None
         
-        # 测试次日保存（固定时间）
-        if current_time == self.test_next_day_time and self.last_next_day_save_date != current_date:
-            print(f"[定时任务-测试] {self.test_next_day_time} 次日保存数据...")
+        # 测试次日保存（当前时间 >= 触发时间 且 今天还没执行过）
+        if self.test_next_day_time and current_time >= self.test_next_day_time and self.last_next_day_save_date != current_date:
+            print(f"[定时任务-测试] {current_time} >= {self.test_next_day_time} 次日保存数据...")
             self._save_next_day_estimate()
             self.last_next_day_save_date = current_date
+            # 次日保存后，清除触发时间，避免重复触发
+            self.test_next_day_time = None
         
         # ===== 正式模式（注释掉测试模式后使用）=====
         # # 15:00 收盘时保存数据
@@ -695,6 +699,15 @@ class FundManagerGUI:
                         close_estimated_nav=data.estimated_nav
                     )
                     print(f"[收盘保存] {fund_code}: 价格={data.market_price}, 估算净值={data.estimated_nav}")
+                    
+                    # 如果有共同日期净值数据，保存到对应日期
+                    if data.common_date and data.common_date_nav and data.historical_nav:
+                        fund.nav_history.add_record(
+                            date=data.common_date,
+                            latest_nav=data.common_date_nav,
+                            historical_nav=data.historical_nav
+                        )
+                        print(f"[收盘保存] {fund_code}: 共同日期={data.common_date}, 净值={data.common_date_nav}, Historical NAV={data.historical_nav}")
             except Exception as e:
                 print(f"[收盘保存] {fund_code} 保存失败: {e}")
         
@@ -706,14 +719,22 @@ class FundManagerGUI:
             try:
                 data = fund.calculate()
                 if data and data.estimated_nav:
-                    # 保存到前一天的记录（因为是次日5点）
-                    from datetime import timedelta
-                    yesterday = (datetime.now() - timedelta(days=1)).strftime("%Y-%m-%d")
+                    # 保存到当天的记录（次日5点估值记录在当天）
+                    today = datetime.now().strftime("%Y-%m-%d")
                     fund.nav_history.add_record(
-                        date=yesterday,
+                        date=today,
                         next_day_estimated_nav=data.estimated_nav
                     )
-                    print(f"[次日5点保存] {fund_code}: 估算净值={data.estimated_nav}")
+                    print(f"[次日5点保存] {fund_code}: 日期={today}, 估算净值={data.estimated_nav}")
+                    
+                    # 如果有共同日期净值数据，保存到对应日期
+                    if data.common_date and data.common_date_nav and data.historical_nav:
+                        fund.nav_history.add_record(
+                            date=data.common_date,
+                            latest_nav=data.common_date_nav,
+                            historical_nav=data.historical_nav
+                        )
+                        print(f"[次日5点保存] {fund_code}: 共同日期={data.common_date}, 净值={data.common_date_nav}, Historical NAV={data.historical_nav}")
             except Exception as e:
                 print(f"[次日5点保存] {fund_code} 保存失败: {e}")
         
