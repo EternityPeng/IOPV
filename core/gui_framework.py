@@ -297,6 +297,22 @@ class FundManagerGUI:
             height=2
         )
         self.test_btn.pack(side=tk.LEFT, padx=5, pady=5)
+        
+        self.premium_query_btn = tk.Button(
+            button_frame,
+            text="📊 折溢价查询",
+            font=("Microsoft YaHei", 11, "bold"),
+            fg="#ffffff",
+            bg="#ff9800",
+            activebackground="#ffa726",
+            activeforeground="#ffffff",
+            relief=tk.FLAT,
+            cursor="hand2",
+            command=self._open_premium_query,
+            width=14,
+            height=2
+        )
+        self.premium_query_btn.pack(side=tk.LEFT, padx=5, pady=5)
     
     def _refresh_all_data(self):
         """刷新所有基金数据"""
@@ -531,6 +547,11 @@ class FundManagerGUI:
         from core.gui_single import run_single_fund_gui
         funds_list = list(self.funds.values())
         run_single_fund_gui(funds_list)
+    
+    def _open_premium_query(self):
+        """打开基金折溢价查询界面"""
+        from core.premium_query import FundPremiumQuery
+        FundPremiumQuery(self.root)
     
     def _save_single_history(self, fund_code: str, data: FundData):
         """保存单个基金的历史净值"""
