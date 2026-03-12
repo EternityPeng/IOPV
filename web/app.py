@@ -141,6 +141,15 @@ def show_main_dashboard(funds):
     # 创建3列布局
     cols = st.columns(3)
     
+    # 辅助函数：安全格式化数值
+    def fmt(value, format_str, prefix='', suffix=''):
+        if value is None:
+            return 'N/A'
+        try:
+            return f"{prefix}{value:{format_str}}{suffix}"
+        except:
+            return 'N/A'
+    
     for idx, (fund_code, fund) in enumerate(fund_list):
         with cols[idx]:
             try:
@@ -155,23 +164,29 @@ def show_main_dashboard(funds):
                     </div>
                     """, unsafe_allow_html=True)
                     
+                    # 颜色判断函数
+                    def get_color(value):
+                        if value is None:
+                            return 'white'
+                        return '#e74c3c' if value > 0 else '#2ecc71' if value < 0 else 'white'
+                    
                     # 数据表格
                     st.markdown(f"""
                     <div style="background-color: #2d2d44; padding: 15px; border-radius: 10px;">
                         <table style="width: 100%; border-collapse: collapse;">
-                            <tr><td style="padding: 8px; border-bottom: 1px solid #3d3d54;">场内价格</td><td style="padding: 8px; border-bottom: 1px solid #3d3d54; text-align: right;">¥{data.market_price:.3f}</td></tr>
-                            <tr><td style="padding: 8px; border-bottom: 1px solid #3d3d54;">涨跌幅</td><td style="padding: 8px; border-bottom: 1px solid #3d3d54; text-align: right; color: {'#e74c3c' if data.market_change_pct and data.market_change_pct > 0 else '#2ecc71' if data.market_change_pct and data.market_change_pct < 0 else 'white'};">{data.market_change_pct:+.2f}%</td></tr>
-                            <tr><td style="padding: 8px; border-bottom: 1px solid #3d3d54;">估算净值</td><td style="padding: 8px; border-bottom: 1px solid #3d3d54; text-align: right;">¥{data.estimated_nav:.4f}</td></tr>
-                            <tr style="background-color: rgba(74, 144, 217, 0.3);"><td style="padding: 10px; border-bottom: 2px solid #4a90d9; font-weight: bold;">折溢价率</td><td style="padding: 10px; border-bottom: 2px solid #4a90d9; text-align: right; font-weight: bold; font-size: 18px; color: {'#e74c3c' if data.premium_discount and data.premium_discount > 0 else '#2ecc71' if data.premium_discount and data.premium_discount < 0 else 'white'};">{data.premium_discount:.2f}%</td></tr>
-                            <tr><td style="padding: 8px; border-bottom: 1px solid #3d3d54;">最新净值</td><td style="padding: 8px; border-bottom: 1px solid #3d3d54; text-align: right;">¥{data.latest_nav:.4f}</td></tr>
-                            <tr><td style="padding: 8px; border-bottom: 1px solid #3d3d54;">净值日期</td><td style="padding: 8px; border-bottom: 1px solid #3d3d54; text-align: right;">{data.latest_nav_date}</td></tr>
-                            <tr><td style="padding: 8px; border-bottom: 1px solid #3d3d54;">NAV涨跌幅</td><td style="padding: 8px; border-bottom: 1px solid #3d3d54; text-align: right; color: {'#e74c3c' if data.nav_change_pct and data.nav_change_pct > 0 else '#2ecc71' if data.nav_change_pct and data.nav_change_pct < 0 else 'white'};">{data.nav_change_pct:.2f}%</td></tr>
-                            <tr><td style="padding: 8px; border-bottom: 1px solid #3d3d54;">Intraday NAV</td><td style="padding: 8px; border-bottom: 1px solid #3d3d54; text-align: right;">${data.intraday_nav:.4f}</td></tr>
-                            <tr><td style="padding: 8px; border-bottom: 1px solid #3d3d54;">Historical NAV</td><td style="padding: 8px; border-bottom: 1px solid #3d3d54; text-align: right;">${data.historical_nav:.4f}</td></tr>
-                            <tr><td style="padding: 8px; border-bottom: 1px solid #3d3d54;">共同日期</td><td style="padding: 8px; border-bottom: 1px solid #3d3d54; text-align: right;">{data.common_date}</td></tr>
-                            <tr><td style="padding: 8px; border-bottom: 1px solid #3d3d54;">汇率</td><td style="padding: 8px; border-bottom: 1px solid #3d3d54; text-align: right;">{data.usd_cny_rate:.4f}</td></tr>
-                            <tr><td style="padding: 8px; border-bottom: 1px solid #3d3d54;">汇率涨跌幅</td><td style="padding: 8px; border-bottom: 1px solid #3d3d54; text-align: right; color: {'#e74c3c' if data.usd_cny_change_pct and data.usd_cny_change_pct > 0 else '#2ecc71' if data.usd_cny_change_pct and data.usd_cny_change_pct < 0 else 'white'};">{data.usd_cny_change_pct:+.2f}%</td></tr>
-                            <tr><td style="padding: 8px;">共同日期汇率</td><td style="padding: 8px; text-align: right;">{data.usd_cny_rate_on_common_date:.4f}</td></tr>
+                            <tr><td style="padding: 8px; border-bottom: 1px solid #3d3d54;">场内价格</td><td style="padding: 8px; border-bottom: 1px solid #3d3d54; text-align: right;">{fmt(data.market_price, '.3f', '¥')}</td></tr>
+                            <tr><td style="padding: 8px; border-bottom: 1px solid #3d3d54;">涨跌幅</td><td style="padding: 8px; border-bottom: 1px solid #3d3d54; text-align: right; color: {get_color(data.market_change_pct)};">{fmt(data.market_change_pct, '+.2f', suffix='%')}</td></tr>
+                            <tr><td style="padding: 8px; border-bottom: 1px solid #3d3d54;">估算净值</td><td style="padding: 8px; border-bottom: 1px solid #3d3d54; text-align: right;">{fmt(data.estimated_nav, '.4f', '¥')}</td></tr>
+                            <tr style="background-color: rgba(74, 144, 217, 0.3);"><td style="padding: 10px; border-bottom: 2px solid #4a90d9; font-weight: bold;">折溢价率</td><td style="padding: 10px; border-bottom: 2px solid #4a90d9; text-align: right; font-weight: bold; font-size: 18px; color: {get_color(data.premium_discount)};">{fmt(data.premium_discount, '.2f', suffix='%')}</td></tr>
+                            <tr><td style="padding: 8px; border-bottom: 1px solid #3d3d54;">最新净值</td><td style="padding: 8px; border-bottom: 1px solid #3d3d54; text-align: right;">{fmt(data.latest_nav, '.4f', '¥')}</td></tr>
+                            <tr><td style="padding: 8px; border-bottom: 1px solid #3d3d54;">净值日期</td><td style="padding: 8px; border-bottom: 1px solid #3d3d54; text-align: right;">{data.latest_nav_date or 'N/A'}</td></tr>
+                            <tr><td style="padding: 8px; border-bottom: 1px solid #3d3d54;">NAV涨跌幅</td><td style="padding: 8px; border-bottom: 1px solid #3d3d54; text-align: right; color: {get_color(data.nav_change_pct)};">{fmt(data.nav_change_pct, '.2f', suffix='%')}</td></tr>
+                            <tr><td style="padding: 8px; border-bottom: 1px solid #3d3d54;">Intraday NAV</td><td style="padding: 8px; border-bottom: 1px solid #3d3d54; text-align: right;">{fmt(data.intraday_nav, '.4f', '$')}</td></tr>
+                            <tr><td style="padding: 8px; border-bottom: 1px solid #3d3d54;">Historical NAV</td><td style="padding: 8px; border-bottom: 1px solid #3d3d54; text-align: right;">{fmt(data.historical_nav, '.4f', '$')}</td></tr>
+                            <tr><td style="padding: 8px; border-bottom: 1px solid #3d3d54;">共同日期</td><td style="padding: 8px; border-bottom: 1px solid #3d3d54; text-align: right;">{data.common_date or 'N/A'}</td></tr>
+                            <tr><td style="padding: 8px; border-bottom: 1px solid #3d3d54;">汇率</td><td style="padding: 8px; border-bottom: 1px solid #3d3d54; text-align: right;">{fmt(data.usd_cny_rate, '.4f')}</td></tr>
+                            <tr><td style="padding: 8px; border-bottom: 1px solid #3d3d54;">汇率涨跌幅</td><td style="padding: 8px; border-bottom: 1px solid #3d3d54; text-align: right; color: {get_color(data.usd_cny_change_pct)};">{fmt(data.usd_cny_change_pct, '+.2f', suffix='%')}</td></tr>
+                            <tr><td style="padding: 8px;">共同日期汇率</td><td style="padding: 8px; text-align: right;">{fmt(data.usd_cny_rate_on_common_date, '.4f')}</td></tr>
                         </table>
                     </div>
                     """, unsafe_allow_html=True)
