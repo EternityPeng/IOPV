@@ -8,6 +8,9 @@ on:
     - cron: '0 21 * * 0-4'
   workflow_dispatch:  # 允许手动触发
 
+permissions:
+  contents: write  # 授予写入权限
+
 env:
   FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
 
@@ -19,6 +22,8 @@ jobs:
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
+        with:
+          persist-credentials: true  # 保持凭据以便推送
       
       - name: Set up Python
         uses: actions/setup-python@v5
@@ -53,6 +58,8 @@ jobs:
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
+        with:
+          persist-credentials: true  # 保持凭据以便推送
       
       - name: Set up Python
         uses: actions/setup-python@v5
