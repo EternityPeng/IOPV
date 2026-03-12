@@ -465,8 +465,9 @@ class Fund159687(BaseFund):
                     
                     page = ChromiumPage(addr_or_opts=co)
                     page.get(self.main_url)
-                    page.wait(2)
+                    page.wait(3)  # 等待页面完全加载
                     
+                    # 处理cookie弹窗
                     try:
                         agree_btn = page.ele("#StateAccept", timeout=3)
                         if agree_btn:
@@ -475,14 +476,17 @@ class Fund159687(BaseFund):
                     except:
                         pass
                     
+                    # 滚动到图表位置
                     page.run_js("window.scrollTo(0, 1500)")
                     page.wait(1)
                     
+                    # 点击Historical NAVs标签
                     historical_tab = page.ele("text:Historical NAVs", timeout=5)
                     if historical_tab:
                         historical_tab.click()
                         page.wait(2)
                     
+                    # 从echarts图表提取数据
                     chart_data = page.run_js("""
                         var chartDom = document.getElementById('PerformChart');
                         if (chartDom && typeof echarts !== 'undefined') {
@@ -503,11 +507,13 @@ class Fund159687(BaseFund):
                         dates = []
                         nav_data = []
                         
+                        # 提取日期数据
                         if 'xAxis' in data:
                             for xa in data['xAxis']:
                                 if 'data' in xa:
                                     dates = xa['data']
                         
+                        # 提取净值数据
                         if 'series' in data:
                             for s in data['series']:
                                 if 'data' in s and len(s.get('data', [])) > 0:
