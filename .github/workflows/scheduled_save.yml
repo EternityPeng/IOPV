@@ -14,7 +14,8 @@ env:
 jobs:
   save-close-data:
     runs-on: ubuntu-latest
-    if: github.event.schedule == '0 7 * * 1-5'
+    # 定时触发(15:00)或手动触发时运行
+    if: github.event.schedule == '0 7 * * 1-5' || github.event_name == 'workflow_dispatch'
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
@@ -47,6 +48,7 @@ jobs:
 
   save-next-day-data:
     runs-on: ubuntu-latest
+    # 只在定时触发(05:00)时运行
     if: github.event.schedule == '0 21 * * 0-4'
     steps:
       - name: Checkout repository
