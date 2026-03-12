@@ -8,6 +8,9 @@ on:
     - cron: '0 21 * * 0-4'
   workflow_dispatch:  # 允许手动触发
 
+env:
+  FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
+
 jobs:
   save-close-data:
     runs-on: ubuntu-latest
@@ -21,10 +24,13 @@ jobs:
         with:
           python-version: '3.10'
       
+      - name: Install Chrome
+        uses: browser-actions/setup-chrome@v1
+      
       - name: Install dependencies
         run: |
           python -m pip install --upgrade pip
-          pip install -r requirements.txt
+          pip install -r web/requirements.txt
       
       - name: Run close data save
         run: |
@@ -51,10 +57,13 @@ jobs:
         with:
           python-version: '3.10'
       
+      - name: Install Chrome
+        uses: browser-actions/setup-chrome@v1
+      
       - name: Install dependencies
         run: |
           python -m pip install --upgrade pip
-          pip install -r requirements.txt
+          pip install -r web/requirements.txt
       
       - name: Run next day data save
         run: |
