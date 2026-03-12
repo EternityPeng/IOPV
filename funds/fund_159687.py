@@ -459,8 +459,9 @@ class Fund159687(BaseFund):
                     # Linux 环境需要特殊配置
                     if platform.system() == 'Linux':
                         co.headless(True)  # 无头模式
-                        co.no_sandbox(True)  # 禁用沙箱
-                        co.disable_gpu(True)  # 禁用 GPU
+                        co.set_argument('--no-sandbox')  # 禁用沙箱
+                        co.set_argument('--disable-gpu')  # 禁用 GPU
+                        co.set_argument('--disable-dev-shm-usage')  # 禁用 /dev/shm 使用
                     
                     page = ChromiumPage(addr_or_opts=co)
                     page.get(self.main_url)
