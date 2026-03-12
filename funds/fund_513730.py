@@ -452,13 +452,23 @@ class Fund513730(BaseFund):
             # 如果没有缓存，尝试使用浏览器获取（仅在本地环境）
             try:
                 from core.base import get_browser_lock
-                from DrissionPage import ChromiumPage
+                from DrissionPage import ChromiumPage, ChromiumOptions
+                import platform
                 
                 # 使用浏览器锁保护浏览器操作
                 with get_browser_lock():
                     print(f"[{self.fund_code}] 正在获取Historical NAV数据...")
                     
-                    page = ChromiumPage()
+                    # 配置浏览器选项
+                    co = ChromiumOptions()
+                    
+                    # Linux 环境需要特殊配置
+                    if platform.system() == 'Linux':
+                        co.headless(True)  # 无头模式
+                        co.no_sandbox(True)  # 禁用沙箱
+                        co.disable_gpu(True)  # 禁用 GPU
+                    
+                    page = ChromiumPage(addr_or_opts=co)
                     page.get(self.main_url)
                     page.wait(2)
                     
