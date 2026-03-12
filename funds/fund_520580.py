@@ -422,6 +422,27 @@ class Fund520580(BaseFund):
     
     def _fetch_historical_nav_from_browser(self, result: dict, today: str) -> dict:
         """使用浏览器获取Historical NAV数据"""
+        # 首先检查缓存
+        if os.path.exists(self.historical_nav_cache_file):
+            try:
+                with open(self.historical_nav_cache_file, 'r', encoding='utf-8') as f:
+                    cache_data = json.load(f)
+                
+                data = cache_data.get('data', {})
+                dates = data.get('date', [])
+                navs = data.get('nav', [])
+                
+                if dates and navs:
+                    result['historical'] = {
+                        'date': dates[0],
+                        'nav': navs[0]
+                    }
+                    print(f"[{self.fund_code}] 使用缓存的Historical NAV数据")
+                    return result
+            except Exception as e:
+                print(f"[{self.fund_code}] 读取缓存失败: {e}")
+        
+        # 如果没有缓存，尝试使用浏览器获取（仅在本地环境）
         try:
             from core.base import get_browser_lock
             from DrissionPage import ChromiumPage
@@ -511,6 +532,8 @@ class Fund520580(BaseFund):
                 page.quit()
                 print("浏览器已关闭")
             
+        except ImportError:
+            print(f"[{self.fund_code}] DrissionPage 未安装，跳过浏览器获取")
         except Exception as e:
             print(f"浏览器获取Historical NAV数据失败: {e}")
         

@@ -411,19 +411,40 @@ class Fund159687(BaseFund):
         try:
             today = datetime.now().strftime("%Y-%m-%d")
             
+            # 首先检查缓存是否存在
             if os.path.exists(self.historical_nav_cache_file):
                 with open(self.historical_nav_cache_file, 'r', encoding='utf-8') as f:
                     cache_data = json.load(f)
                 
-                if cache_data.get('cache_date') == today:
-                    dates = cache_data.get('dates', [])
-                    nav_data = cache_data.get('nav_data', [])
-                else:
-                    cache_data = None
-            else:
-                cache_data = None
+                dates = cache_data.get('dates', [])
+                nav_data = cache_data.get('nav_data', [])
+                
+                # 尝试从缓存中查找目标日期
+                target_date_obj = None
+                try:
+                    target_date_obj = datetime.strptime(target_date, "%Y-%m-%d")
+                except:
+                    pass
+                
+                for i, date in enumerate(dates):
+                    try:
+                        date_obj = datetime.strptime(date, "%d %b,%Y")
+                        if target_date_obj and date_obj.strftime("%Y-%m-%d") == target_date:
+                            nav = nav_data[i] if i < len(nav_data) else None
+                            formatted_date = date_obj.strftime("%Y-%m-%d")
+                            return {
+                                'date': formatted_date,
+                                'nav': nav
+                            }
+                    except:
+                        pass
+                
+                # 如果缓存中有数据但没找到目标日期，返回 None
+                print(f"[{self.fund_code}] 缓存中未找到目标日期 {target_date} 的数据")
+                return None
             
-            if not cache_data:
+            # 如果没有缓存，尝试使用浏览器获取（仅在本地环境）
+            try:
                 from core.base import get_browser_lock
                 from DrissionPage import ChromiumPage
                 
@@ -492,28 +513,30 @@ class Fund159687(BaseFund):
                             json.dump(cache_data, f, ensure_ascii=False)
                         
                         print(f"[{self.fund_code}] Historical NAV数据已更新")
-            
-            dates = cache_data.get('dates', [])
-            nav_data = cache_data.get('nav_data', [])
-            
-            target_date_obj = None
-            try:
-                target_date_obj = datetime.strptime(target_date, "%Y-%m-%d")
-            except:
-                pass
-            
-            for i, date in enumerate(dates):
-                try:
-                    date_obj = datetime.strptime(date, "%d %b,%Y")
-                    if target_date_obj and date_obj.strftime("%Y-%m-%d") == target_date:
-                        nav = nav_data[i] if i < len(nav_data) else None
-                        formatted_date = date_obj.strftime("%Y-%m-%d")
-                        return {
-                            'date': formatted_date,
-                            'nav': nav
-                        }
-                except:
-                    pass
+                        
+                        # 再次尝试查找目标日期
+                        target_date_obj = None
+                        try:
+                            target_date_obj = datetime.strptime(target_date, "%Y-%m-%d")
+                        except:
+                            pass
+                        
+                        for i, date in enumerate(dates):
+                            try:
+                                date_obj = datetime.strptime(date, "%d %b,%Y")
+                                if target_date_obj and date_obj.strftime("%Y-%m-%d") == target_date:
+                                    nav = nav_data[i] if i < len(nav_data) else None
+                                    formatted_date = date_obj.strftime("%Y-%m-%d")
+                                    return {
+                                        'date': formatted_date,
+                                        'nav': nav
+                                    }
+                            except:
+                                pass
+            except ImportError:
+                print(f"[{self.fund_code}] DrissionPage 未安装，跳过浏览器获取")
+            except Exception as e:
+                print(f"[{self.fund_code}] 浏览器获取失败: {e}")
             
             # 如果未找到匹配日期，返回None
             return None

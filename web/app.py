@@ -1,6 +1,28 @@
 """
 IOPV 基金估值系统 - Streamlit Web 应用
+
+运行方式：
+=========
+方式一（推荐）：使用 Streamlit 命令
+    cd web
+    streamlit run app.py
+
+方式二：指定端口
+    cd web
+    streamlit run app.py --server.port 8501
+
+方式三：允许外网访问
+    cd web
+    streamlit run app.py --server.port 8501 --server.address 0.0.0.0
+
+注意：
+- 不要使用 python app.py 运行，否则会报错
+- 默认端口是 8501，如果被占用可以换成其他端口
+- 访问地址：http://localhost:8501
 """
+
+import warnings
+warnings.filterwarnings("ignore", message=".*missing ScriptRunContext.*")
 
 import streamlit as st
 import pandas as pd

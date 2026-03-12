@@ -415,30 +415,48 @@ class Fund513730(BaseFund):
     def _get_historical_nav_by_date(self, target_date: str) -> Optional[dict]:
         """获取指定日期的历史净值"""
         try:
-            from core.base import get_browser_lock
-            
             today = datetime.now().strftime("%Y-%m-%d")
             
-            # 先检查缓存是否存在
-            cache_data = None
+            # 首先检查缓存是否存在
             if os.path.exists(self.historical_nav_cache_file):
                 with open(self.historical_nav_cache_file, 'r', encoding='utf-8') as f:
                     cache_data = json.load(f)
-            
-            # 检查缓存是否是今天的
-            dates = []
-            nav_data = []
-            
-            if cache_data and cache_data.get('cache_date') == today:
+                
                 dates = cache_data.get('dates', [])
                 nav_data = cache_data.get('nav_data', [])
-            else:
-                # 缓存不是今天的，需要重新获取
+                
+                # 尝试从缓存中查找目标日期
+                target_date_obj = None
+                try:
+                    target_date_obj = datetime.strptime(target_date, "%Y-%m-%d")
+                except:
+                    pass
+                
+                for i, date in enumerate(dates):
+                    try:
+                        date_obj = datetime.strptime(date, "%d %b,%Y")
+                        if target_date_obj and date_obj.strftime("%Y-%m-%d") == target_date:
+                            nav = nav_data[i] if i < len(nav_data) else None
+                            formatted_date = date_obj.strftime("%Y-%m-%d")
+                            return {
+                                'date': formatted_date,
+                                'nav': nav
+                            }
+                    except:
+                        pass
+                
+                # 如果缓存中有数据但没找到目标日期，返回 None
+                print(f"[{self.fund_code}] 缓存中未找到目标日期 {target_date} 的数据")
+                return None
+            
+            # 如果没有缓存，尝试使用浏览器获取（仅在本地环境）
+            try:
+                from core.base import get_browser_lock
+                from DrissionPage import ChromiumPage
+                
                 # 使用浏览器锁保护浏览器操作
                 with get_browser_lock():
                     print(f"[{self.fund_code}] 正在获取Historical NAV数据...")
-                    
-                    from DrissionPage import ChromiumPage
                     
                     page = ChromiumPage()
                     page.get(self.main_url)
@@ -481,6 +499,9 @@ class Fund513730(BaseFund):
                     if chart_data:
                         data = json.loads(chart_data)
                         
+                        dates = []
+                        nav_data = []
+                        
                         # 提取日期数据
                         if 'xAxis' in data:
                             for xa in data['xAxis']:
@@ -505,28 +526,30 @@ class Fund513730(BaseFund):
                             json.dump(cache_data, f, ensure_ascii=False)
                         
                         print(f"[{self.fund_code}] Historical NAV数据已更新")
-            
-            # 解析目标日期
-            target_date_obj = None
-            try:
-                target_date_obj = datetime.strptime(target_date, "%Y-%m-%d")
-            except:
-                pass
-            
-            # 查找匹配日期的净值
-            for i, date in enumerate(dates):
-                try:
-                    date_obj = datetime.strptime(date, "%d %b,%Y")
-                    if target_date_obj and date_obj.strftime("%Y-%m-%d") == target_date:
-                        nav = nav_data[i] if i < len(nav_data) else None
-                        # 转换日期格式为 YYYY-MM-DD
-                        formatted_date = date_obj.strftime("%Y-%m-%d")
-                        return {
-                            'date': formatted_date,
-                            'nav': nav
-                        }
-                except:
-                    pass
+                        
+                        # 再次尝试查找目标日期
+                        target_date_obj = None
+                        try:
+                            target_date_obj = datetime.strptime(target_date, "%Y-%m-%d")
+                        except:
+                            pass
+                        
+                        for i, date in enumerate(dates):
+                            try:
+                                date_obj = datetime.strptime(date, "%d %b,%Y")
+                                if target_date_obj and date_obj.strftime("%Y-%m-%d") == target_date:
+                                    nav = nav_data[i] if i < len(nav_data) else None
+                                    formatted_date = date_obj.strftime("%Y-%m-%d")
+                                    return {
+                                        'date': formatted_date,
+                                        'nav': nav
+                                    }
+                            except:
+                                pass
+            except ImportError:
+                print(f"[{self.fund_code}] DrissionPage 未安装，跳过浏览器获取")
+            except Exception as e:
+                print(f"[{self.fund_code}] 浏览器获取失败: {e}")
             
             # 如果未找到匹配日期，返回None
             return None
