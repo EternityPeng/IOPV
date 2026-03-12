@@ -20,17 +20,19 @@ class FundManagerGUI:
     同时显示多个基金、实时刷新、数据保存等功能
     """
     
-    def __init__(self, root: tk.Tk, funds: List[BaseFund]):
+    def __init__(self, root: tk.Tk, funds: List[BaseFund], test_mode: bool = False):
         """
         初始化GUI
         
         Args:
             root: Tkinter根窗口
             funds: 基金列表
+            test_mode: 是否启用测试模式（定时任务在启动后2分钟和3分钟触发）
         """
         self.root = root
         self.funds = {fund.fund_code: fund for fund in funds}
         self.fund_data: Dict[str, FundData] = {}
+        self.test_mode = test_mode
         
         self.auto_refresh_interval = 30000  # 30秒
         self.auto_refresh_id = None
@@ -43,7 +45,9 @@ class FundManagerGUI:
         # 测试模式：固定触发时间（程序启动后2分钟和3分钟）
         self.test_close_time = None
         self.test_next_day_time = None
-        self._init_test_schedule_times()
+        
+        if test_mode:
+            self._init_test_schedule_times()
         
         self._setup_window()
         self._setup_styles()
@@ -673,39 +677,39 @@ class FundManagerGUI:
         current_time = now.strftime("%H:%M")
         current_date = now.strftime("%Y-%m-%d")
         
-        # ===== 测试模式 =====
-        # 使用固定的触发时间（程序启动时计算好的）
-        print(f"[定时检查] 当前时间: {current_time}, 收盘触发时间: {self.test_close_time}, 次日触发时间: {self.test_next_day_time}")
-        
-        # 测试收盘保存（当前时间 >= 触发时间 且 今天还没执行过）
-        if self.test_close_time and current_time >= self.test_close_time and self.last_close_save_date != current_date:
-            print(f"[定时任务-测试] {current_time} >= {self.test_close_time} 收盘保存数据...")
-            self._save_close_data()
-            self.last_close_save_date = current_date
-            # 收盘保存后，清除触发时间，避免重复触发
-            self.test_close_time = None
-        
-        # 测试次日保存（当前时间 >= 触发时间 且 今天还没执行过）
-        if self.test_next_day_time and current_time >= self.test_next_day_time and self.last_next_day_save_date != current_date:
-            print(f"[定时任务-测试] {current_time} >= {self.test_next_day_time} 次日保存数据...")
-            self._save_next_day_estimate()
-            self.last_next_day_save_date = current_date
-            # 次日保存后，清除触发时间，避免重复触发
-            self.test_next_day_time = None
-        
-        # ===== 正式模式（注释掉测试模式后使用）=====
-        # # 15:00 收盘时保存数据
-        # if current_time == "15:00" and self.last_close_save_date != current_date:
-        #     print(f"[定时任务] 15:00 收盘保存数据...")
-        #     self._save_close_data()
-        #     self.last_close_save_date = current_date
-        # 
-        # # 05:00 次日5点保存估算净值
-        # if current_time == "05:00" and self.last_next_day_save_date != current_date:
-        #     print(f"[定时任务] 05:00 保存次日估算净值...")
-        #     self._save_next_day_estimate()
-        #     self.last_next_day_save_date = current_date
-        # ===========================================
+        if self.test_mode:
+            # ===== 测试模式 =====
+            # 使用固定的触发时间（程序启动时计算好的）
+            print(f"[定时检查-测试模式] 当前时间: {current_time}, 收盘触发时间: {self.test_close_time}, 次日触发时间: {self.test_next_day_time}")
+            
+            # 测试收盘保存（当前时间 >= 触发时间 且 今天还没执行过）
+            if self.test_close_time and current_time >= self.test_close_time and self.last_close_save_date != current_date:
+                print(f"[定时任务-测试] {current_time} >= {self.test_close_time} 收盘保存数据...")
+                self._save_close_data()
+                self.last_close_save_date = current_date
+                # 收盘保存后，清除触发时间，避免重复触发
+                self.test_close_time = None
+            
+            # 测试次日保存（当前时间 >= 触发时间 且 今天还没执行过）
+            if self.test_next_day_time and current_time >= self.test_next_day_time and self.last_next_day_save_date != current_date:
+                print(f"[定时任务-测试] {current_time} >= {self.test_next_day_time} 次日保存数据...")
+                self._save_next_day_estimate()
+                self.last_next_day_save_date = current_date
+                # 次日保存后，清除触发时间，避免重复触发
+                self.test_next_day_time = None
+        else:
+            # ===== 正式模式 =====
+            # 15:00 收盘时保存数据
+            if current_time == "15:00" and self.last_close_save_date != current_date:
+                print(f"[定时任务] 15:00 收盘保存数据...")
+                self._save_close_data()
+                self.last_close_save_date = current_date
+            
+            # 05:00 次日5点保存估算净值
+            if current_time == "05:00" and self.last_next_day_save_date != current_date:
+                print(f"[定时任务] 05:00 保存次日估算净值...")
+                self._save_next_day_estimate()
+                self.last_next_day_save_date = current_date
     
     def _save_close_data(self):
         """收盘时保存数据（15:00）"""

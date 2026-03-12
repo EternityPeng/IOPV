@@ -2,9 +2,16 @@
 基金实时估值系统 - 主程序入口
 
 使用方法:
-    python main.py              # 启动GUI
-    python main.py --cli        # 命令行模式
-    python main.py --list       # 列出所有可用基金
+    python main.py                    # 启动GUI（正式模式，15:00和05:00触发定时任务）
+    python main.py --cli              # 命令行模式
+    python main.py --cli <基金代码>   # 命令行模式，指定基金
+    python main.py --list             # 列出所有可用基金
+    python main.py --test-scheduled   # 启动GUI（测试模式，启动后2分钟和4分钟触发定时任务）
+    python main.py --help             # 显示帮助信息
+
+定时任务说明:
+    正式模式: 15:00 收盘保存数据，05:00 次日保存估算净值
+    测试模式: 启动后2分钟收盘保存，启动后4分钟次日保存
 """
 
 import sys
@@ -65,7 +72,7 @@ def run_cli(fund_code: str = None):
         print(f"计算失败: {e}")
 
 
-def run_gui():
+def run_gui(test_mode=False):
     """GUI模式运行"""
     import tkinter as tk
     from core.gui_framework import FundManagerGUI
@@ -79,7 +86,7 @@ def run_gui():
     
     # 创建GUI
     root = tk.Tk()
-    app = FundManagerGUI(root, funds)
+    app = FundManagerGUI(root, funds, test_mode=test_mode)
     
     print("GUI已启动，关闭窗口退出程序...")
     root.mainloop()
@@ -95,6 +102,8 @@ def main():
         elif arg == "--cli":
             fund_code = sys.argv[2] if len(sys.argv) > 2 else None
             run_cli(fund_code)
+        elif arg == "--test-scheduled":
+            run_gui(test_mode=True)
         elif arg == "--help" or arg == "-h":
             print(__doc__)
         else:
