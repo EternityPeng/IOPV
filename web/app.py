@@ -212,6 +212,87 @@ def show_main_dashboard(funds):
                         </table>
                     </div>
                     """, unsafe_allow_html=True)
+                    
+                    # 官网链接
+                    fund_urls = {
+                        '520580': 'https://www.lionglobalinvestors.com/en/fund-lion-china-merchants-emerging-asia-select-index-etf.html',
+                        '159687': 'https://www.csopasset.com/sg/en/products/sg-carbon/etf.php',
+                        '513730': 'https://www.csopasset.com/sg/en/products/sg-atech/etf.php'
+                    }
+                    
+                    st.markdown(f"""
+                    <a href="{fund_urls.get(fund_code, '#')}" target="_blank" style="
+                        display: inline-block;
+                        background: linear-gradient(135deg, #3498db 0%, #2980b9 100%);
+                        color: white;
+                        padding: 8px 16px;
+                        border-radius: 5px;
+                        text-decoration: none;
+                        font-size: 14px;
+                        margin-top: 10px;
+                    ">🔗 访问官网查看 Historical NAV</a>
+                    """, unsafe_allow_html=True)
+                    
+                    # 手动输入 Historical NAV
+                    st.markdown("---")
+                    st.markdown("**📝 手动输入 Historical NAV**")
+                    
+                    col_date, col_input, col_save = st.columns([1.5, 2, 1])
+                    with col_date:
+                        nav_date = st.date_input(
+                            "日期",
+                            value=datetime.now().date(),
+                            key=f"nav_date_{fund_code}"
+                        )
+                    with col_input:
+                        historical_nav_input = st.text_input(
+                            "Historical NAV (USD)",
+                            value=f"{data.historical_nav:.4f}" if data.historical_nav else "",
+                            key=f"historical_nav_{fund_code}",
+                            placeholder="例如: 0.9531"
+                        )
+                    with col_save:
+                        st.write("")  # 占位
+                        st.write("")  # 占位
+                        if st.button("💾 保存", key=f"save_historical_{fund_code}"):
+                            try:
+                                nav_value = float(historical_nav_input)
+                                # 保存到缓存文件
+                                import json
+                                cache_file = f"cache/{fund_code}/historical_nav_cache.json"
+                                save_date = nav_date.strftime("%Y-%m-%d")
+                                
+                                # 读取现有缓存或创建新的
+                                if os.path.exists(cache_file):
+                                    with open(cache_file, 'r', encoding='utf-8') as f:
+                                        cache_data = json.load(f)
+                                else:
+                                    cache_data = {
+                                        'cache_date': save_date,
+                                        'dates': [],
+                                        'nav_data': []
+                                    }
+                                
+                                # 添加或更新指定日期的数据
+                                if save_date not in cache_data.get('dates', []):
+                                    cache_data['dates'].insert(0, save_date)
+                                    cache_data['nav_data'].insert(0, nav_value)
+                                else:
+                                    # 更新指定日期的数据
+                                    idx = cache_data['dates'].index(save_date)
+                                    cache_data['nav_data'][idx] = nav_value
+                                
+                                # 保存缓存
+                                os.makedirs(os.path.dirname(cache_file), exist_ok=True)
+                                with open(cache_file, 'w', encoding='utf-8') as f:
+                                    json.dump(cache_data, f, ensure_ascii=False, indent=2)
+                                
+                                st.success(f"✅ 已保存 {save_date} 的 Historical NAV: ${nav_value:.4f}")
+                                st.rerun()
+                            except ValueError:
+                                st.error("❌ 请输入有效的数字")
+                            except Exception as e:
+                                st.error(f"❌ 保存失败: {e}")
             except Exception as e:
                 st.error(f"获取 {fund_code} 数据失败: {e}")
     

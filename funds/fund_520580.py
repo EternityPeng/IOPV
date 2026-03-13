@@ -432,46 +432,82 @@ class Fund520580(BaseFund):
         return result
     
     def _fetch_historical_nav_from_browser(self, result: dict, today: str) -> dict:
-        """使用浏览器获取Historical NAV数据"""
-        # 首先检查缓存
+        """使用浏览器获取Historical NAV数据
+        
+        逻辑：
+        1. 检查缓存是否存在
+        2. 如果缓存日期不是今天，尝试用浏览器获取新数据
+        3. 如果浏览器获取失败，使用缓存数据
+        """
+        cache_data = None
+        cache_dates = []
+        cache_navs = []
+        
+        # 1. 检查缓存是否存在
         if os.path.exists(self.historical_nav_cache_file):
             try:
                 with open(self.historical_nav_cache_file, 'r', encoding='utf-8') as f:
                     cache_data = json.load(f)
                 
                 data = cache_data.get('data', {})
-                dates = data.get('date', [])
-                navs = data.get('nav', [])
+                cache_dates = data.get('date', [])
+                cache_navs = data.get('nav', [])
                 
-                if dates and navs:
-                    result['historical'] = {
-                        'date': dates[0],
-                        'nav': navs[0]
-                    }
-                    print(f"[{self.fund_code}] 使用缓存的Historical NAV数据")
-                    return result
+                # 检查缓存日期是否是今天
+                cache_date = cache_data.get('cache_date', '')
+                if cache_date != today:
+                    print(f"[{self.fund_code}] 缓存日期({cache_date})不是今天，尝试获取新数据...")
+                    
+                    # 2. 尝试用浏览器获取新数据
+                    new_data = self._fetch_historical_nav_from_web(today)
+                    if new_data:
+                        cache_dates = new_data.get('date', [])
+                        cache_navs = new_data.get('nav', [])
+                    else:
+                        print(f"[{self.fund_code}] 浏览器获取失败，使用缓存数据")
+                else:
+                    print(f"[{self.fund_code}] 使用今天的缓存数据")
+                    
             except Exception as e:
                 print(f"[{self.fund_code}] 读取缓存失败: {e}")
+                # 尝试用浏览器获取
+                new_data = self._fetch_historical_nav_from_web(today)
+                if new_data:
+                    cache_dates = new_data.get('date', [])
+                    cache_navs = new_data.get('nav', [])
+        else:
+            # 没有缓存，尝试用浏览器获取
+            print(f"[{self.fund_code}] 缓存不存在，尝试获取新数据...")
+            new_data = self._fetch_historical_nav_from_web(today)
+            if new_data:
+                cache_dates = new_data.get('date', [])
+                cache_navs = new_data.get('nav', [])
         
-        # 如果没有缓存，尝试使用浏览器获取（仅在本地环境）
+        # 3. 返回结果
+        if cache_dates and cache_navs:
+            result['historical'] = {
+                'date': cache_dates[0],
+                'nav': float(cache_navs[0]) if cache_navs[0] is not None else None
+            }
+        
+        return result
+    
+    def _fetch_historical_nav_from_web(self, today: str) -> Optional[dict]:
+        """从网页获取Historical NAV数据"""
         try:
             from core.base import get_browser_lock
             from DrissionPage import ChromiumPage, ChromiumOptions
             import platform
             
-            # 使用浏览器锁保护浏览器操作
             with get_browser_lock():
                 print(f"[{self.fund_code}] 正在使用浏览器获取Historical NAV...")
                 
-                # 配置浏览器选项
                 co = ChromiumOptions()
-                
-                # Linux 环境需要特殊配置
                 if platform.system() == 'Linux':
-                    co.headless(True)  # 无头模式
-                    co.set_argument('--no-sandbox')  # 禁用沙箱
-                    co.set_argument('--disable-gpu')  # 禁用 GPU
-                    co.set_argument('--disable-dev-shm-usage')  # 禁用 /dev/shm 使用
+                    co.headless(True)
+                    co.set_argument('--no-sandbox')
+                    co.set_argument('--disable-gpu')
+                    co.set_argument('--disable-dev-shm-usage')
                 
                 page = ChromiumPage(addr_or_opts=co)
                 print("浏览器已启动，正在获取Historical NAV...")
@@ -498,18 +534,12 @@ class Fund520580(BaseFund):
                     print(f"点击Historical NAVs按钮失败: {e}")
                 
                 # 解析Historical NAV表格
-                historical_result = {
-                    'date': None,
-                    'nav': None
-                }
-                
                 historical_nav_list = {
                     'date': [],
                     'nav': []
                 }
                 
                 try:
-                    # 使用表格ID来定位
                     table = page.ele('#dtHistoricalPricing', timeout=5)
                     if table:
                         print("Historical NAV表格已找到")
@@ -519,11 +549,9 @@ class Fund520580(BaseFund):
                             for row in rows:
                                 cells = row.eles('tag:td')
                                 if len(cells) >= 2:
-                                    # 第一列是NAV Price，第二列是Date
                                     nav_str = cells[0].text.strip()
                                     date_str = cells[1].text.strip()
                                     
-                                    # 跳过表头行
                                     if nav_str == 'NAV Price' or date_str == 'Date':
                                         continue
                                     
@@ -535,31 +563,32 @@ class Fund520580(BaseFund):
                                         pass
                             
                             if historical_nav_list['date']:
-                                historical_result['date'] = historical_nav_list['date'][0]
-                                historical_result['nav'] = historical_nav_list['nav'][0]
                                 print(f"成功获取Historical NAV数据: {len(historical_nav_list['date'])}条记录")
                 except Exception as e:
                     print(f"解析Historical NAV表格失败: {e}")
                 
-                # 保存Historical NAV到缓存
-                if historical_result.get('nav'):
+                # 保存到缓存
+                if historical_nav_list['date']:
                     cache_data = {
                         'cache_date': today,
                         'data': historical_nav_list
                     }
                     with open(self.historical_nav_cache_file, 'w', encoding='utf-8') as f:
                         json.dump(cache_data, f, ensure_ascii=False, indent=2)
-                    result['historical'] = historical_result
+                    print(f"[{self.fund_code}] Historical NAV数据已更新")
+                    return historical_nav_list
                 
                 page.quit()
                 print("浏览器已关闭")
-            
+                
+            return None
+                    
         except ImportError:
             print(f"[{self.fund_code}] DrissionPage 未安装，跳过浏览器获取")
+            return None
         except Exception as e:
-            print(f"浏览器获取Historical NAV数据失败: {e}")
-        
-        return result
+            print(f"[{self.fund_code}] 浏览器获取失败: {e}")
+            return None
     
     def _get_cached_intraday_nav(self) -> dict:
         """从缓存获取Intraday NAV"""
@@ -600,15 +629,22 @@ class Fund520580(BaseFund):
         except Exception as e:
             print(f"保存缓存失败: {e}")
     
-    def _calculate_nav_change(self, historical_nav: float, intraday_nav: float) -> Optional[dict]:
+    def _calculate_nav_change(self, historical_nav, intraday_nav) -> Optional[dict]:
         """计算NAV涨跌幅"""
-        if historical_nav and intraday_nav and historical_nav > 0:
-            change = intraday_nav - historical_nav
-            change_pct = (change / historical_nav) * 100
-            return {
-                'change': change,
-                'change_pct': change_pct
-            }
+        try:
+            # 确保转换为浮点数
+            historical_nav = float(historical_nav) if historical_nav is not None else None
+            intraday_nav = float(intraday_nav) if intraday_nav is not None else None
+            
+            if historical_nav and intraday_nav and historical_nav > 0:
+                change = intraday_nav - historical_nav
+                change_pct = (change / historical_nav) * 100
+                return {
+                    'change': change,
+                    'change_pct': change_pct
+                }
+        except (ValueError, TypeError):
+            pass
         return None
     
     def _get_market_price(self) -> Optional[dict]:

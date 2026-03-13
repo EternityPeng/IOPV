@@ -407,168 +407,172 @@ class Fund159687(BaseFund):
             print(f"保存A股历史净值失败: {e}")
     
     def _get_historical_nav_by_date(self, target_date: str) -> Optional[dict]:
-        """获取指定日期的历史净值"""
+        """获取指定日期的历史净值
+        
+        逻辑：
+        1. 检查缓存是否存在
+        2. 如果缓存日期不是今天，尝试用浏览器获取新数据
+        3. 如果浏览器获取失败，使用缓存数据
+        4. 从数据中查找目标日期
+        """
         try:
             today = datetime.now().strftime("%Y-%m-%d")
+            cache_data = None
+            cache_dates = []
+            cache_nav_data = []
             
-            # 首先检查缓存是否存在
+            # 1. 检查缓存是否存在
             if os.path.exists(self.historical_nav_cache_file):
                 with open(self.historical_nav_cache_file, 'r', encoding='utf-8') as f:
                     cache_data = json.load(f)
-                
-                dates = cache_data.get('dates', [])
-                nav_data = cache_data.get('nav_data', [])
-                
-                # 尝试从缓存中查找目标日期
-                target_date_obj = None
+                cache_dates = cache_data.get('dates', [])
+                cache_nav_data = cache_data.get('nav_data', [])
+            
+                # 检查缓存日期是否是今天
+                cache_date = cache_data.get('cache_date', '')
+                if cache_date != today:
+                    print(f"[{self.fund_code}] 缓存日期({cache_date})不是今天，尝试获取新数据...")
+                    
+                    # 2. 尝试用浏览器获取新数据
+                    new_data = self._fetch_historical_nav_from_browser(today)
+                    if new_data:
+                        cache_dates = new_data.get('dates', [])
+                        cache_nav_data = new_data.get('nav_data', [])
+                        cache_data = new_data
+                    else:
+                        print(f"[{self.fund_code}] 浏览器获取失败，使用缓存数据")
+            else:
+                print(f"[{self.fund_code}] 使用今天的缓存数据")
+            
+            # 4. 从数据中查找目标日期
+            target_date_obj = None
+            try:
+                target_date_obj = datetime.strptime(target_date, "%Y-%m-%d")
+            except:
+                pass
+            
+            for i, date in enumerate(cache_dates):
                 try:
-                    target_date_obj = datetime.strptime(target_date, "%Y-%m-%d")
+                    date_obj = datetime.strptime(date, "%d %b,%Y")
+                    if target_date_obj and date_obj.strftime("%Y-%m-%d") == target_date:
+                        nav = cache_nav_data[i] if i < len(cache_nav_data) else None
+                        formatted_date = date_obj.strftime("%Y-%m-%d")
+                        return {
+                            'date': formatted_date,
+                            'nav': float(nav) if nav is not None else None
+                        }
                 except:
                     pass
-                
-                for i, date in enumerate(dates):
-                    try:
-                        date_obj = datetime.strptime(date, "%d %b,%Y")
-                        if target_date_obj and date_obj.strftime("%Y-%m-%d") == target_date:
-                            nav = nav_data[i] if i < len(nav_data) else None
-                            formatted_date = date_obj.strftime("%Y-%m-%d")
-                            return {
-                                'date': formatted_date,
-                                'nav': nav
-                            }
-                    except:
-                        pass
-                
-                # 如果缓存中有数据但没找到目标日期，返回 None
-                print(f"[{self.fund_code}] 缓存中未找到目标日期 {target_date} 的数据")
-                return None
             
-            # 如果没有缓存，尝试使用浏览器获取（仅在本地环境）
-            try:
-                from core.base import get_browser_lock
-                from DrissionPage import ChromiumPage, ChromiumOptions
-                import platform
-                
-                # 使用浏览器锁保护浏览器操作
-                with get_browser_lock():
-                    print(f"[{self.fund_code}] 正在获取Historical NAV数据...")
-                    
-                    # 配置浏览器选项
-                    co = ChromiumOptions()
-                    
-                    # Linux 环境需要特殊配置
-                    if platform.system() == 'Linux':
-                        co.headless(True)  # 无头模式
-                        co.set_argument('--no-sandbox')  # 禁用沙箱
-                        co.set_argument('--disable-gpu')  # 禁用 GPU
-                        co.set_argument('--disable-dev-shm-usage')  # 禁用 /dev/shm 使用
-                    
-                    page = ChromiumPage(addr_or_opts=co)
-                    page.get(self.main_url)
-                    page.wait(3)  # 等待页面完全加载
-                    
-                    # 处理cookie弹窗
-                    try:
-                        agree_btn = page.ele("#StateAccept", timeout=3)
-                        if agree_btn:
-                            agree_btn.click()
-                            page.wait(1)
-                    except:
-                        pass
-                    
-                    # 滚动到图表位置
-                    page.run_js("window.scrollTo(0, 1500)")
-                    page.wait(1)
-                    
-                    # 点击Historical NAVs标签
-                    historical_tab = page.ele("text:Historical NAVs", timeout=5)
-                    if historical_tab:
-                        historical_tab.click()
-                        page.wait(2)
-                    
-                    # 从echarts图表提取数据
-                    chart_data = page.run_js("""
-                        var chartDom = document.getElementById('PerformChart');
-                        if (chartDom && typeof echarts !== 'undefined') {
-                            var chart = echarts.getInstanceByDom(chartDom);
-                            if (chart) {
-                                var option = chart.getOption();
-                                return JSON.stringify(option);
-                            }
-                        }
-                        return null;
-                    """)
-                    
-                    page.quit()
-                    
-                    if chart_data:
-                        data = json.loads(chart_data)
-                        
-                        dates = []
-                        nav_data = []
-                        
-                        # 提取日期数据
-                        if 'xAxis' in data:
-                            for xa in data['xAxis']:
-                                if 'data' in xa:
-                                    dates = xa['data']
-                        
-                        # 提取净值数据
-                        if 'series' in data:
-                            for s in data['series']:
-                                if 'data' in s and len(s.get('data', [])) > 0:
-                                    nav_data = s.get('data', [])
-                                    break
-                        
-                        cache_data = {
-                            'cache_date': today,
-                            'dates': dates,
-                            'nav_data': nav_data
-                        }
-                        
-                        with open(self.historical_nav_cache_file, 'w', encoding='utf-8') as f:
-                            json.dump(cache_data, f, ensure_ascii=False)
-                        
-                        print(f"[{self.fund_code}] Historical NAV数据已更新")
-                        
-                        # 再次尝试查找目标日期
-                        target_date_obj = None
-                        try:
-                            target_date_obj = datetime.strptime(target_date, "%Y-%m-%d")
-                        except:
-                            pass
-                        
-                        for i, date in enumerate(dates):
-                            try:
-                                date_obj = datetime.strptime(date, "%d %b,%Y")
-                                if target_date_obj and date_obj.strftime("%Y-%m-%d") == target_date:
-                                    nav = nav_data[i] if i < len(nav_data) else None
-                                    formatted_date = date_obj.strftime("%Y-%m-%d")
-                                    return {
-                                        'date': formatted_date,
-                                        'nav': nav
-                                    }
-                            except:
-                                pass
-            except ImportError:
-                print(f"[{self.fund_code}] DrissionPage 未安装，跳过浏览器获取")
-            except Exception as e:
-                print(f"[{self.fund_code}] 浏览器获取失败: {e}")
-            
-            # 如果未找到匹配日期，返回None
+            print(f"[{self.fund_code}] 缓存中未找到目标日期 {target_date} 的数据")
             return None
-                
+            
         except Exception as e:
             print(f"获取Historical NAV失败: {e}")
             return None
     
-    def _calculate_nav_change(self, historical_nav: float, intraday_nav: float) -> Optional[dict]:
+    def _fetch_historical_nav_from_browser(self, today: str) -> Optional[dict]:
+        """使用浏览器获取Historical NAV数据"""
+        try:
+            from core.base import get_browser_lock
+            from DrissionPage import ChromiumPage, ChromiumOptions
+            import platform
+            
+            with get_browser_lock():
+                print(f"[{self.fund_code}] 正在使用浏览器获取Historical NAV...")
+                
+                co = ChromiumOptions()
+                if platform.system() == 'Linux':
+                    co.headless(True)
+                    co.set_argument('--no-sandbox')
+                    co.set_argument('--disable-gpu')
+                    co.set_argument('--disable-dev-shm-usage')
+                
+                page = ChromiumPage(addr_or_opts=co)
+                page.get(self.main_url)
+                page.wait(3)
+                
+                try:
+                    agree_btn = page.ele("#StateAccept", timeout=3)
+                    if agree_btn:
+                        agree_btn.click()
+                        page.wait(1)
+                except:
+                    pass
+                
+                page.run_js("window.scrollTo(0, 1500)")
+                page.wait(1)
+                
+                historical_tab = page.ele("text:Historical NAVs", timeout=5)
+                if historical_tab:
+                    historical_tab.click()
+                    page.wait(3)
+                
+                chart_data = page.run_js("""
+                    var chartDom = document.getElementById('PerformChart');
+                    if (chartDom && typeof echarts !== 'undefined') {
+                        var chart = echarts.getInstanceByDom(chartDom);
+                        if (chart) {
+                            var option = chart.getOption();
+                            return JSON.stringify(option);
+                        }
+                    }
+                    return null;
+                """)
+                
+                page.quit()
+                
+                if chart_data:
+                    data = json.loads(chart_data)
+                    dates = []
+                    nav_data = []
+                    
+                    if 'xAxis' in data:
+                        for xa in data['xAxis']:
+                            if 'data' in xa:
+                                dates = xa['data']
+                    
+                    if 'series' in data:
+                        for s in data['series']:
+                            if 'data' in s and len(s.get('data', [])) > 0:
+                                nav_data = s.get('data', [])
+                                break
+                    
+                    cache_data = {
+                        'cache_date': today,
+                        'dates': dates,
+                        'nav_data': nav_data
+                    }
+                    
+                    with open(self.historical_nav_cache_file, 'w', encoding='utf-8') as f:
+                        json.dump(cache_data, f, ensure_ascii=False)
+                    
+                    print(f"[{self.fund_code}] Historical NAV数据已更新")
+                    return cache_data
+                    
+            return None
+                    
+        except ImportError:
+            print(f"[{self.fund_code}] DrissionPage 未安装，跳过浏览器获取")
+            return None
+        except Exception as e:
+            print(f"[{self.fund_code}] 浏览器获取失败: {e}")
+            return None
+    
+    def _calculate_nav_change(self, historical_nav, intraday_nav) -> Optional[dict]:
         """计算NAV涨跌幅"""
-        if historical_nav and intraday_nav and historical_nav > 0:
-            change = intraday_nav - historical_nav
-            change_pct = (change / historical_nav) * 100
-            return {
-                'change': change,
-                'change_pct': change_pct
-            }
+        try:
+            # 确保转换为浮点数
+            historical_nav = float(historical_nav) if historical_nav is not None else None
+            intraday_nav = float(intraday_nav) if intraday_nav is not None else None
+            
+            if historical_nav and intraday_nav and historical_nav > 0:
+                change = intraday_nav - historical_nav
+                change_pct = (change / historical_nav) * 100
+                return {
+                    'change': change,
+                    'change_pct': change_pct
+                }
+        except (ValueError, TypeError):
+            pass
         return None
