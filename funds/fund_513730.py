@@ -491,19 +491,48 @@ class Fund513730(BaseFund):
                 historical_tab = page.ele("text:Historical NAVs", timeout=5)
                 if historical_tab:
                     historical_tab.click()
-                    page.wait(3)
+                    page.wait(5)
                 
-                chart_data = page.run_js("""
-                    var chartDom = document.getElementById('PerformChart');
-                    if (chartDom && typeof echarts !== 'undefined') {
-                        var chart = echarts.getInstanceByDom(chartDom);
-                        if (chart) {
-                            var option = chart.getOption();
-                            return JSON.stringify(option);
+                # 等待图表数据加载，最多等待30秒
+                chart_data = None
+                max_wait_time = 30
+                wait_interval = 3
+                elapsed_time = 0
+                
+                while elapsed_time < max_wait_time:
+                    chart_data = page.run_js("""
+                        var chartDom = document.getElementById('PerformChart');
+                        if (chartDom && typeof echarts !== 'undefined') {
+                            var chart = echarts.getInstanceByDom(chartDom);
+                            if (chart) {
+                                var option = chart.getOption();
+                                if (option && option.xAxis && option.xAxis[0] && option.xAxis[0].data && option.xAxis[0].data.length > 0) {
+                                    return JSON.stringify(option);
+                                }
+                            }
                         }
-                    }
-                    return null;
-                """)
+                        return null;
+                    """)
+                    
+                    if chart_data:
+                        data = json.loads(chart_data)
+                        dates = []
+                        if 'xAxis' in data:
+                            for xa in data['xAxis']:
+                                if 'data' in xa and len(xa['data']) > 0:
+                                    dates = xa['data']
+                                    break
+                        
+                        if len(dates) > 0:
+                            print(f"[{self.fund_code}] 图表数据已加载，共 {len(dates)} 条记录")
+                            break
+                    
+                    print(f"[{self.fund_code}] 等待图表数据加载... ({elapsed_time + wait_interval}秒)")
+                    page.wait(wait_interval)
+                    elapsed_time += wait_interval
+                
+                if not chart_data:
+                    print(f"[{self.fund_code}] 等待超时，未能获取到图表数据")
                 
                 page.quit()
                 

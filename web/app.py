@@ -23,6 +23,8 @@ IOPV 基金估值系统 - Streamlit Web 应用
 
 import warnings
 warnings.filterwarnings("ignore", message=".*missing ScriptRunContext.*")
+warnings.filterwarnings("ignore", message=".*Could not infer format.*")
+warnings.filterwarnings("ignore", category=UserWarning, module="akshare")
 
 import streamlit as st
 import pandas as pd
