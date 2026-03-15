@@ -70,6 +70,77 @@ st.markdown("""
         padding: 1rem;
         border-radius: 0.5rem;
     }
+    
+    /* 侧边栏导航美化 */
+    section[data-testid="stSidebar"] [role="radiogroup"] {
+        gap: 8px;
+    }
+    
+    section[data-testid="stSidebar"] [role="radiogroup"] label {
+        background: linear-gradient(135deg, #2d2d44 0%, #1a1a2e 100%);
+        border-radius: 12px;
+        padding: 12px 16px;
+        margin: 2px 0;
+        border: 1px solid #3d3d54;
+        transition: all 0.3s ease;
+        width: 100%;
+    }
+    
+    section[data-testid="stSidebar"] [role="radiogroup"] label:hover {
+        background: linear-gradient(135deg, #4a90d9 0%, #357abd 50%, #2d6aa0 100%);
+        border-color: #5a9de9;
+        transform: translateX(5px);
+        box-shadow: 0 4px 15px rgba(74, 144, 217, 0.3);
+    }
+    
+    section[data-testid="stSidebar"] [role="radiogroup"] label[data-checked="true"] {
+        background: linear-gradient(135deg, #4a90d9 0%, #357abd 100%);
+        border-color: #5a9de9;
+        box-shadow: 0 4px 15px rgba(74, 144, 217, 0.4);
+    }
+    
+    section[data-testid="stSidebar"] [role="radiogroup"] label span {
+        color: #e0e0e0;
+        font-size: 15px;
+        font-weight: 500;
+    }
+    
+    section[data-testid="stSidebar"] [role="radiogroup"] label:hover span {
+        color: #ffffff;
+    }
+    
+    section[data-testid="stSidebar"] [role="radiogroup"] label[data-checked="true"] span {
+        color: #ffffff;
+        font-weight: 600;
+    }
+    
+    /* 隐藏圆点 */
+    section[data-testid="stSidebar"] [role="radiogroup"] label div[data-testid="stMarkdownContainer"] p {
+        display: flex;
+        align-items: center;
+    }
+    
+    section[data-testid="stSidebar"] [role="radiogroup"] label div[data-testid="stMarkdownContainer"] p::before {
+        content: none !important;
+    }
+    
+    /* 隐藏 Streamlit 默认的圆点样式 */
+    section[data-testid="stSidebar"] [role="radiogroup"] label input[type="radio"] {
+        display: none;
+    }
+    
+    section[data-testid="stSidebar"] [role="radiogroup"] label div[data-testid="stMarkdownContainer"] {
+        display: block !important;
+    }
+    
+    /* 侧边栏标题美化 */
+    section[data-testid="stSidebar"] .stMarkdown h1 {
+        color: #4a90d9;
+        font-size: 1.5rem;
+        margin-bottom: 1rem;
+        padding-bottom: 0.5rem;
+        border-bottom: 2px solid #3d3d54;
+    }
 </style>
 """, unsafe_allow_html=True)
 
@@ -87,29 +158,24 @@ def init_funds():
 
 def show_main_dashboard(funds):
     """显示主仪表盘"""
+    # 在命令行打印分割线和时间
+    print("\n" + "=" * 80)
+    print(f"Web 刷新时间: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
+    print("=" * 80)
+    
     st.markdown('<h1 class="main-header">📊 IOPV 基金估值系统</h1>', unsafe_allow_html=True)
     
-    # 紧凑的顶部布局：刷新 | 时间 | 自动刷新 | 保存数据 | 保存CSV
-    col1, col2, col3, col4, col5 = st.columns([1, 1.5, 1.5, 1, 1.2])
+    # 时间显示 - 在标题下方，字体大一点
+    st.markdown(f'<p style="font-size: 18px; color: #888; text-align: center; margin-top: -10px; margin-bottom: 20px;">📅 {datetime.now().strftime("%Y-%m-%d %H:%M:%S")}</p>', unsafe_allow_html=True)
+    
+    # 紧凑的顶部布局：刷新 | 保存TXT | 保存CSV | 自动刷新
+    col1, col2, col3, col4 = st.columns([1, 1, 1.2, 1.5])
     
     with col1:
         refresh_clicked = st.button("🔄 刷新", type="primary")
     
     with col2:
-        st.caption(f"📅 {datetime.now().strftime('%m-%d %H:%M:%S')}")
-    
-    with col3:
-        auto_refresh = st.toggle("自动刷新", value=False, key="auto_refresh_toggle")
-        if auto_refresh:
-            refresh_interval = st.select_slider(
-                "间隔(秒)",
-                options=[10, 30, 60, 120, 300],
-                value=60,
-                key="refresh_interval"
-            )
-    
-    with col4:
-        save_clicked = st.button("💾 保存", type="secondary")
+        save_clicked = st.button("💾 保存TXT", type="secondary")
         if save_clicked:
             saved_count = 0
             for fund_code, fund in funds.items():
@@ -123,7 +189,7 @@ def show_main_dashboard(funds):
             if saved_count > 0:
                 st.success(f"已保存 {saved_count} 个基金")
     
-    with col5:
+    with col3:
         csv_clicked = st.button("📊 保存CSV", type="secondary")
         if csv_clicked:
             saved_count = 0
@@ -154,6 +220,16 @@ def show_main_dashboard(funds):
                     st.error(f"保存 {fund_code} 历史净值失败: {e}")
             if saved_count > 0:
                 st.success(f"已保存 {saved_count} 个基金CSV")
+    
+    with col4:
+        auto_refresh = st.toggle("自动刷新", value=False, key="auto_refresh_toggle")
+        if auto_refresh:
+            refresh_interval = st.select_slider(
+                "间隔(秒)",
+                options=[10, 30, 60, 120, 300],
+                value=60,
+                key="refresh_interval"
+            )
     
     st.divider()
     
@@ -254,7 +330,7 @@ def show_main_dashboard(funds):
                     with col_save:
                         st.write("")  # 占位
                         st.write("")  # 占位
-                        if st.button("💾 保存", key=f"save_historical_{fund_code}"):
+                        if st.button("保存", key=f"save_historical_{fund_code}"):
                             try:
                                 nav_value = float(historical_nav_input)
                                 # 保存到缓存文件 - 统一格式
@@ -285,6 +361,30 @@ def show_main_dashboard(funds):
                                 os.makedirs(os.path.dirname(cache_file), exist_ok=True)
                                 with open(cache_file, 'w', encoding='utf-8') as f:
                                     json.dump(cache_data, f, ensure_ascii=False, indent=2)
+                                
+                                # 同步更新 nav_history.csv
+                                try:
+                                    from core.nav_history import NavHistoryManager
+                                    cache_dir = os.path.join(os.path.dirname(os.path.dirname(__file__)), f"cache/{fund_code}")
+                                    nav_history = NavHistoryManager(cache_dir, fund_code)
+                                    nav_history.add_record(
+                                        date=save_date,
+                                        market_price=None,
+                                        close_estimated_nav=None,
+                                        next_day_estimated_nav=None,
+                                        latest_nav=None,
+                                        historical_nav=nav_value
+                                    )
+                                except Exception as e:
+                                    print(f"更新 nav_history 失败: {e}")
+                                
+                                # 在命令行打印手动输入的信息
+                                print("\n" + "=" * 80)
+                                print(f"[手动输入] {fund_code} Historical NAV 已更新")
+                                print(f"  日期: {save_date}")
+                                print(f"  净值: ${nav_value:.4f}")
+                                print(f"  时间: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
+                                print("=" * 80)
                                 
                                 st.success(f"✅ 已保存 {save_date} 的 Historical NAV: ${nav_value:.4f}")
                                 st.rerun()
@@ -359,19 +459,40 @@ def show_premium_query():
         df = st.session_state.merged_df
         fund_code = st.session_state.fund_code
         
-        # 统计信息
+        # 自定义天数选择
         st.subheader(f"📈 {fund_code} 折溢价统计")
+        col_days, col_info = st.columns([1, 3])
+        with col_days:
+            days = st.number_input("统计天数", min_value=1, max_value=len(df), value=5, step=1)
+        with col_info:
+            st.write("")  # 占位
+        
+        # 统计信息
+        recent_x = df.head(days)
+        mean_val = recent_x['折溢价率(%)'].mean()
+        std_val = recent_x['折溢价率(%)'].std()
+        
         col1, col2, col3, col4 = st.columns(4)
         
-        recent_5 = df.head(5)
         with col1:
-            st.metric("总记录数", len(df))
+            st.metric(f"{days}日平均折溢价", f"{mean_val:.2f}%")
         with col2:
-            st.metric("5日平均折溢价", f"{recent_5['折溢价率(%)'].mean():.2f}%")
+            st.metric(f"{days}日最高折溢价", f"{recent_x['折溢价率(%)'].max():.2f}%")
         with col3:
-            st.metric("最高折溢价", f"{recent_5['折溢价率(%)'].max():.2f}%")
+            st.metric(f"{days}日最低折溢价", f"{recent_x['折溢价率(%)'].min():.2f}%")
         with col4:
-            st.metric("最低折溢价", f"{recent_5['折溢价率(%)'].min():.2f}%")
+            st.metric(f"{days}日中位数", f"{recent_x['折溢价率(%)'].median():.2f}%")
+        
+        # 标准差信息
+        col5, col6, col7 = st.columns(3)
+        with col5:
+            st.metric(f"{days}日标准差", f"{std_val:.2f}%")
+        with col6:
+            st.metric(f"+2σ 上限", f"{mean_val + 2*std_val:.2f}%")
+        with col7:
+            st.metric(f"-2σ 下限", f"{mean_val - 2*std_val:.2f}%")
+        
+        st.metric("总记录数", len(df))
         
         st.divider()
         
@@ -540,8 +661,7 @@ def main():
     
     # 侧边栏信息
     st.sidebar.divider()
-    st.sidebar.info("IOPV 基金估值系统 v2.0")
-    st.sidebar.write("基于 Streamlit 构建")
+    st.sidebar.info("IOPV 基金估值系统")
 
 
 if __name__ == "__main__":
