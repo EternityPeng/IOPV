@@ -59,7 +59,9 @@ def run_cli(fund_code: str = None):
         # 默认使用第一个基金
         fund = AVAILABLE_FUNDS[0]()
     
-    print(f"\n正在计算 {fund.fund_code} - {fund.fund_name} 的估值...")
+    print("\n" + "=" * 80)
+    print(f"正在计算 {fund.fund_code} - {fund.fund_name} 的估值...")
+    print("=" * 80)
     
     try:
         data = fund.calculate()
@@ -67,9 +69,13 @@ def run_cli(fund_code: str = None):
         
         # 自动保存数据
         filepath = fund.save_to_file(data)
-        print(f"\n数据已保存到: {filepath}")
+        print("\n" + "=" * 80)
+        print(f"数据已保存到: {filepath}")
+        print("=" * 80)
     except Exception as e:
+        print("\n" + "=" * 80)
         print(f"计算失败: {e}")
+        print("=" * 80)
 
 
 def run_gui(test_mode=False):

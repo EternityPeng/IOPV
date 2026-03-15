@@ -257,30 +257,29 @@ def show_main_dashboard(funds):
                         if st.button("💾 保存", key=f"save_historical_{fund_code}"):
                             try:
                                 nav_value = float(historical_nav_input)
-                                # 保存到缓存文件
+                                # 保存到缓存文件 - 统一格式
                                 import json
-                                cache_file = f"cache/{fund_code}/historical_nav_cache.json"
+                                cache_file = os.path.join(os.path.dirname(os.path.dirname(__file__)), f"cache/{fund_code}/historical_nav_cache.json")
                                 save_date = nav_date.strftime("%Y-%m-%d")
+                                today_str = datetime.now().strftime("%Y-%m-%d")
                                 
                                 # 读取现有缓存或创建新的
                                 if os.path.exists(cache_file):
                                     with open(cache_file, 'r', encoding='utf-8') as f:
                                         cache_data = json.load(f)
+                                    # 获取现有的 data 字典
+                                    nav_dict = cache_data.get('data', {})
                                 else:
-                                    cache_data = {
-                                        'cache_date': save_date,
-                                        'dates': [],
-                                        'nav_data': []
-                                    }
+                                    nav_dict = {}
                                 
                                 # 添加或更新指定日期的数据
-                                if save_date not in cache_data.get('dates', []):
-                                    cache_data['dates'].insert(0, save_date)
-                                    cache_data['nav_data'].insert(0, nav_value)
-                                else:
-                                    # 更新指定日期的数据
-                                    idx = cache_data['dates'].index(save_date)
-                                    cache_data['nav_data'][idx] = nav_value
+                                nav_dict[save_date] = nav_value
+                                
+                                # 构建缓存数据 - 统一格式
+                                cache_data = {
+                                    'cache_date': today_str,
+                                    'data': nav_dict
+                                }
                                 
                                 # 保存缓存
                                 os.makedirs(os.path.dirname(cache_file), exist_ok=True)

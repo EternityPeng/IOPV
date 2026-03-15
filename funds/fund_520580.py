@@ -165,7 +165,7 @@ class Fund520580(BaseFund):
             # 读取A股历史净值缓存
             a_historical_nav_file = os.path.join(self.cache_dir, "a_historical_nav_cache.json")
             if not os.path.exists(a_historical_nav_file):
-                print("A股历史净值缓存文件不存在")
+                print(f"[{self.fund_code}] A股历史净值缓存文件不存在")
                 return None
             
             with open(a_historical_nav_file, 'r', encoding='utf-8') as f:
@@ -174,7 +174,7 @@ class Fund520580(BaseFund):
             
             # 检查官网历史净值缓存是否存在，如果不存在则获取
             if not os.path.exists(self.historical_nav_cache_file):
-                print("官网历史净值缓存文件不存在，正在获取...")
+                print(f"[{self.fund_code}] 官网历史净值缓存文件不存在，正在获取...")
                 # 触发获取历史净值数据
                 nav_data = self._get_nav_from_web()
                 if nav_data and nav_data.get('historical'):
@@ -183,16 +183,14 @@ class Fund520580(BaseFund):
             
             # 再次检查缓存是否存在
             if not os.path.exists(self.historical_nav_cache_file):
-                print("获取官网历史净值失败")
+                print(f"[{self.fund_code}] 获取官网历史净值失败")
                 return None
             
             with open(self.historical_nav_cache_file, 'r', encoding='utf-8') as f:
                 official_cache_data = json.load(f)
             
-            # 520580的官网历史净值格式为 {'data': {'date': [...], 'nav': [...]}}
+            # 统一格式: {'cache_date', 'data': {"YYYY-MM-DD": 净值}}
             official_data = official_cache_data.get('data', {})
-            official_dates = official_data.get('date', [])
-            official_navs = official_data.get('nav', [])
             
             # 获取最近15日的A股净值日期
             from datetime import datetime, timedelta
@@ -206,26 +204,17 @@ class Fund520580(BaseFund):
             for date in recent_15_dates:
                 # 检查A股历史净值中是否有该日期
                 if date in a_historical_nav:
-                    # 将日期格式转换为官网格式 (YYYY-MM-DD -> DD-Mon-YY)
-                    try:
-                        date_obj = datetime.strptime(date, "%Y-%m-%d")
-                        official_date_format = date_obj.strftime("%d-%b-%y")
+                    # 检查官网历史净值中是否有该日期（统一格式，直接用日期作为key）
+                    if date in official_data:
+                        official_nav = official_data[date]
                         
-                        # 检查官网历史净值中是否有该日期
-                        if official_date_format in official_dates:
-                            idx = official_dates.index(official_date_format)
-                            official_nav = official_navs[idx] if idx < len(official_navs) else None
-                            
-                            return {
-                                'date': date,
-                                'nav': a_historical_nav[date],
-                                'official_nav': official_nav
-                            }
-                    except Exception as e:
-                        print(f"日期格式转换错误: {e}")
-                        continue
+                        return {
+                            'date': date,
+                            'nav': a_historical_nav[date],
+                            'official_nav': official_nav
+                        }
             
-            print("未找到共同日期的净值数据")
+            print(f"[{self.fund_code}] 未找到共同日期的净值数据")
             return None
             
         except Exception as e:
@@ -249,7 +238,7 @@ class Fund520580(BaseFund):
             if match:
                 return match.group(1)
             
-            print("未找到fundSecurityId")
+            print(f"[{self.fund_code}] 未找到fundSecurityId")
             return None
             
         except Exception as e:
@@ -276,14 +265,14 @@ class Fund520580(BaseFund):
                 if cache_date == today:
                     cached_historical = cache_data.get('data')
                     result['historical'] = cached_historical
-                    # print(f"使用今日缓存的Historical NAV数据 (缓存日期: {cache_date})")
+                    print(f"[{self.fund_code}] 使用今天的缓存数据")
                     need_fetch_historical = False
                 else:
-                    print(f"Historical NAV缓存日期({cache_date})不是今日，需要重新获取")
+                    print(f"[{self.fund_code}] 缓存日期({cache_date})不是今天，尝试获取新数据...")
             except Exception as e:
-                print(f"读取Historical NAV缓存失败: {e}")
+                print(f"[{self.fund_code}] 读取缓存失败: {e}")
         else:
-            print("Historical NAV缓存不存在，需要获取")
+            print(f"[{self.fund_code}] 缓存文件不存在，尝试获取新数据...")
         
         # Intraday NAV需要实时爬取
         try:
@@ -335,7 +324,7 @@ class Fund520580(BaseFund):
                     # 如果API获取失败，使用浏览器获取
                     result = self._get_nav_from_browser(result, need_fetch_historical, today)
             else:
-                print("未找到fundSecurityId，使用浏览器获取数据")
+                print(f"[{self.fund_code}] 未找到fundSecurityId，使用浏览器获取数据")
                 # 如果API获取失败，使用浏览器获取
                 result = self._get_nav_from_browser(result, need_fetch_historical, today)
             
@@ -439,9 +428,7 @@ class Fund520580(BaseFund):
         2. 如果缓存日期不是今天，尝试用浏览器获取新数据
         3. 如果浏览器获取失败，使用缓存数据
         """
-        cache_data = None
-        cache_dates = []
-        cache_navs = []
+        cache_nav_dict = {}
         
         # 1. 检查缓存是否存在
         if os.path.exists(self.historical_nav_cache_file):
@@ -449,9 +436,8 @@ class Fund520580(BaseFund):
                 with open(self.historical_nav_cache_file, 'r', encoding='utf-8') as f:
                     cache_data = json.load(f)
                 
-                data = cache_data.get('data', {})
-                cache_dates = data.get('date', [])
-                cache_navs = data.get('nav', [])
+                # 统一格式: {'data': {"YYYY-MM-DD": 净值}}
+                cache_nav_dict = cache_data.get('data', {})
                 
                 # 检查缓存日期是否是今天
                 cache_date = cache_data.get('cache_date', '')
@@ -461,8 +447,7 @@ class Fund520580(BaseFund):
                     # 2. 尝试用浏览器获取新数据
                     new_data = self._fetch_historical_nav_from_web(today)
                     if new_data:
-                        cache_dates = new_data.get('date', [])
-                        cache_navs = new_data.get('nav', [])
+                        cache_nav_dict = new_data
                     else:
                         print(f"[{self.fund_code}] 浏览器获取失败，使用缓存数据")
                 else:
@@ -473,22 +458,24 @@ class Fund520580(BaseFund):
                 # 尝试用浏览器获取
                 new_data = self._fetch_historical_nav_from_web(today)
                 if new_data:
-                    cache_dates = new_data.get('date', [])
-                    cache_navs = new_data.get('nav', [])
+                    cache_nav_dict = new_data
         else:
             # 没有缓存，尝试用浏览器获取
             print(f"[{self.fund_code}] 缓存不存在，尝试获取新数据...")
             new_data = self._fetch_historical_nav_from_web(today)
             if new_data:
-                cache_dates = new_data.get('date', [])
-                cache_navs = new_data.get('nav', [])
+                cache_nav_dict = new_data
         
-        # 3. 返回结果
-        if cache_dates and cache_navs:
-            result['historical'] = {
-                'date': cache_dates[0],
-                'nav': float(cache_navs[0]) if cache_navs[0] is not None else None
-            }
+        # 3. 返回结果（获取最新日期的数据）
+        if cache_nav_dict:
+            # 获取最新的日期
+            sorted_dates = sorted(cache_nav_dict.keys(), reverse=True)
+            if sorted_dates:
+                latest_date = sorted_dates[0]
+                result['historical'] = {
+                    'date': latest_date,
+                    'nav': cache_nav_dict[latest_date]
+                }
         
         return result
     
@@ -567,16 +554,27 @@ class Fund520580(BaseFund):
                 except Exception as e:
                     print(f"解析Historical NAV表格失败: {e}")
                 
-                # 保存到缓存
+                # 保存到缓存 - 统一字典格式
                 if historical_nav_list['date']:
+                    # 转换为字典格式 {"YYYY-MM-DD": 净值}
+                    nav_dict = {}
+                    for date_str, nav_value in zip(historical_nav_list['date'], historical_nav_list['nav']):
+                        # 将日期格式从 "DD-Mon-YY" 转换为 "YYYY-MM-DD"
+                        try:
+                            dt = datetime.strptime(date_str, "%d-%b-%y")
+                            formatted_date = dt.strftime("%Y-%m-%d")
+                            nav_dict[formatted_date] = nav_value
+                        except:
+                            pass
+                    
                     cache_data = {
                         'cache_date': today,
-                        'data': historical_nav_list
+                        'data': nav_dict
                     }
                     with open(self.historical_nav_cache_file, 'w', encoding='utf-8') as f:
                         json.dump(cache_data, f, ensure_ascii=False, indent=2)
-                    print(f"[{self.fund_code}] Historical NAV数据已更新")
-                    return historical_nav_list
+                    print(f"[{self.fund_code}] Historical NAV数据已更新: {len(nav_dict)}条记录")
+                    return nav_dict
                 
                 page.quit()
                 print("浏览器已关闭")
@@ -605,12 +603,15 @@ class Fund520580(BaseFund):
         return {'date': 'N/A', 'time': 'N/A', 'nav_usd': None}
     
     def _get_cached_historical_nav(self) -> Optional[dict]:
-        """从缓存获取Historical NAV"""
+        """从缓存获取Historical NAV
+        
+        返回格式: {"YYYY-MM-DD": 净值}
+        """
         try:
             if os.path.exists(self.historical_nav_cache_file):
                 with open(self.historical_nav_cache_file, 'r', encoding='utf-8') as f:
                     cache_data = json.load(f)
-                return cache_data.get('data')
+                return cache_data.get('data', {})
         except Exception:
             pass
         

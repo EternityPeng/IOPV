@@ -160,7 +160,7 @@ class Fund159687(BaseFund):
             # 读取A股历史净值缓存
             a_historical_nav_file = os.path.join(self.cache_dir, "a_historical_nav_cache.json")
             if not os.path.exists(a_historical_nav_file):
-                print("A股历史净值缓存文件不存在")
+                print(f"[{self.fund_code}] A股历史净值缓存文件不存在")
                 return None
             
             with open(a_historical_nav_file, 'r', encoding='utf-8') as f:
@@ -169,7 +169,7 @@ class Fund159687(BaseFund):
             
             # 检查官网历史净值缓存是否存在，如果不存在则获取
             if not os.path.exists(self.historical_nav_cache_file):
-                print("官网历史净值缓存文件不存在，正在获取...")
+                print(f"[{self.fund_code}] 官网历史净值缓存文件不存在，正在获取...")
                 # 获取最近15天的日期，尝试获取历史净值
                 from datetime import datetime, timedelta
                 today = datetime.now()
@@ -187,8 +187,8 @@ class Fund159687(BaseFund):
             with open(self.historical_nav_cache_file, 'r', encoding='utf-8') as f:
                 official_cache_data = json.load(f)
             
-            official_dates = official_cache_data.get('dates', [])
-            official_nav_data = official_cache_data.get('nav_data', [])
+            # 统一格式: {'cache_date', 'data': {"YYYY-MM-DD": 净值}}
+            official_data = official_cache_data.get('data', {})
             
             # 获取最近15日的A股净值日期
             from datetime import datetime, timedelta
@@ -202,26 +202,17 @@ class Fund159687(BaseFund):
             for date in recent_15_dates:
                 # 检查A股历史净值中是否有该日期
                 if date in a_historical_nav:
-                    # 检查官网历史净值中是否有该日期
-                    # 需要将日期格式转换为官网格式 (YYYY-MM-DD -> DD Mon,YYYY)
-                    try:
-                        date_obj = datetime.strptime(date, "%Y-%m-%d")
-                        official_date_format = date_obj.strftime("%d %b,%Y")
+                    # 检查官网历史净值中是否有该日期（统一格式，直接用日期作为key）
+                    if date in official_data:
+                        official_nav = official_data[date]
                         
-                        if official_date_format in official_dates:
-                            idx = official_dates.index(official_date_format)
-                            official_nav = official_nav_data[idx]
-                            
-                            return {
-                                'date': date,
-                                'nav': a_historical_nav[date],
-                                'official_nav': official_nav
-                            }
-                    except Exception as e:
-                        print(f"日期格式转换错误: {e}")
-                        continue
+                        return {
+                            'date': date,
+                            'nav': a_historical_nav[date],
+                            'official_nav': official_nav
+                        }
             
-            print("未找到共同日期的净值数据")
+            print(f"[{self.fund_code}] 未找到共同日期的净值数据")
             return None
             
         except Exception as e:
@@ -409,25 +400,20 @@ class Fund159687(BaseFund):
     def _get_historical_nav_by_date(self, target_date: str) -> Optional[dict]:
         """获取指定日期的历史净值
         
-        逻辑：
-        1. 检查缓存是否存在
-        2. 如果缓存日期不是今天，尝试用浏览器获取新数据
-        3. 如果浏览器获取失败，使用缓存数据
-        4. 从数据中查找目标日期
+        统一格式: {"YYYY-MM-DD": 净值}
         """
         try:
             today = datetime.now().strftime("%Y-%m-%d")
-            cache_data = None
-            cache_dates = []
-            cache_nav_data = []
+            cache_nav_dict = {}
             
             # 1. 检查缓存是否存在
             if os.path.exists(self.historical_nav_cache_file):
                 with open(self.historical_nav_cache_file, 'r', encoding='utf-8') as f:
                     cache_data = json.load(f)
-                cache_dates = cache_data.get('dates', [])
-                cache_nav_data = cache_data.get('nav_data', [])
-            
+                
+                # 统一格式: {'data': {"YYYY-MM-DD": 净值}}
+                cache_nav_dict = cache_data.get('data', {})
+                
                 # 检查缓存日期是否是今天
                 cache_date = cache_data.get('cache_date', '')
                 if cache_date != today:
@@ -436,33 +422,26 @@ class Fund159687(BaseFund):
                     # 2. 尝试用浏览器获取新数据
                     new_data = self._fetch_historical_nav_from_browser(today)
                     if new_data:
-                        cache_dates = new_data.get('dates', [])
-                        cache_nav_data = new_data.get('nav_data', [])
-                        cache_data = new_data
+                        cache_nav_dict = new_data
                     else:
                         print(f"[{self.fund_code}] 浏览器获取失败，使用缓存数据")
+                else:
+                    print(f"[{self.fund_code}] 使用今天的缓存数据")
             else:
-                print(f"[{self.fund_code}] 使用今天的缓存数据")
+                # 缓存文件不存在，尝试获取新数据
+                print(f"[{self.fund_code}] 缓存文件不存在，尝试获取新数据...")
+                new_data = self._fetch_historical_nav_from_browser(today)
+                if new_data:
+                    cache_nav_dict = new_data
             
-            # 4. 从数据中查找目标日期
-            target_date_obj = None
-            try:
-                target_date_obj = datetime.strptime(target_date, "%Y-%m-%d")
-            except:
-                pass
-            
-            for i, date in enumerate(cache_dates):
-                try:
-                    date_obj = datetime.strptime(date, "%d %b,%Y")
-                    if target_date_obj and date_obj.strftime("%Y-%m-%d") == target_date:
-                        nav = cache_nav_data[i] if i < len(cache_nav_data) else None
-                        formatted_date = date_obj.strftime("%Y-%m-%d")
-                        return {
-                            'date': formatted_date,
-                            'nav': float(nav) if nav is not None else None
-                        }
-                except:
-                    pass
+            # 3. 从数据中查找目标日期
+            if cache_nav_dict and target_date in cache_nav_dict:
+                nav = cache_nav_dict[target_date]
+                if nav is not None:
+                    return {
+                        'date': target_date,
+                        'nav': float(nav)
+                    }
             
             print(f"[{self.fund_code}] 缓存中未找到目标日期 {target_date} 的数据")
             return None
@@ -538,17 +517,29 @@ class Fund159687(BaseFund):
                                 nav_data = s.get('data', [])
                                 break
                     
+                    # 转换为统一格式: {"YYYY-MM-DD": 净值}
+                    nav_dict = {}
+                    for i in range(len(dates)):
+                        try:
+                            date_str = dates[i]
+                            nav = nav_data[i] if i < len(nav_data) else None
+                            # 解析日期格式 "DD Mon,YYYY" -> "YYYY-MM-DD"
+                            date_obj = datetime.strptime(date_str, "%d %b,%Y")
+                            formatted_date = date_obj.strftime("%Y-%m-%d")
+                            nav_dict[formatted_date] = float(nav) if nav is not None else None
+                        except:
+                            pass
+                    
                     cache_data = {
                         'cache_date': today,
-                        'dates': dates,
-                        'nav_data': nav_data
+                        'data': nav_dict
                     }
                     
                     with open(self.historical_nav_cache_file, 'w', encoding='utf-8') as f:
-                        json.dump(cache_data, f, ensure_ascii=False)
+                        json.dump(cache_data, f, ensure_ascii=False, indent=2)
                     
-                    print(f"[{self.fund_code}] Historical NAV数据已更新")
-                    return cache_data
+                    print(f"[{self.fund_code}] Historical NAV数据已更新: {len(nav_dict)}条记录")
+                    return nav_dict
                     
             return None
                     
