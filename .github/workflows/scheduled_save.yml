@@ -61,10 +61,11 @@ jobs:
           git config --local user.name "GitHub Action"
           git add -A
           git reset -- '**/__pycache__/' '**/*.pyc'
-          git checkout -- '**/__pycache__/' '**/*.pyc'
           BEIJING_TIME=$(TZ='Asia/Shanghai' date '+%Y-%m-%d %H:%M:%S')
           git diff --quiet && git diff --staged --quiet || git commit -m "Auto save: Morning data at 05:00 Beijing Time ($BEIJING_TIME)"
+          git stash --include-untracked
           git pull --rebase origin main
+          git stash pop || true
           git push origin main
 
   # 早上9:20获取汇率数据
@@ -114,10 +115,11 @@ jobs:
           git config --local user.name "GitHub Action"
           git add -A
           git reset -- '**/__pycache__/' '**/*.pyc'
-          git checkout -- '**/__pycache__/' '**/*.pyc'
           BEIJING_TIME=$(TZ='Asia/Shanghai' date '+%Y-%m-%d %H:%M:%S')
           git diff --quiet && git diff --staged --quiet || git commit -m "Auto save: Exchange rate data at 09:20 Beijing Time ($BEIJING_TIME)"
+          git stash --include-untracked
           git pull --rebase origin main
+          git stash pop || true
           git push origin main
 
   # 下午3点收盘保存净值到CSV
@@ -157,8 +159,9 @@ jobs:
           git config --local user.name "GitHub Action"
           git add -A
           git reset -- '**/__pycache__/' '**/*.pyc'
-          git checkout -- '**/__pycache__/' '**/*.pyc'
           BEIJING_TIME=$(TZ='Asia/Shanghai' date '+%Y-%m-%d %H:%M:%S')
           git diff --quiet && git diff --staged --quiet || git commit -m "Auto save: Close data at 15:00 Beijing Time ($BEIJING_TIME)"
+          git stash --include-untracked
           git pull --rebase origin main
+          git stash pop || true
           git push origin main
