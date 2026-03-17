@@ -92,12 +92,12 @@ jobs:
         run: |
           python -c "
           from datetime import datetime
-          from core.exchange_rate import ExchangeRateManager
+          from core.exchange_rate import get_usd_cny_latest_rate
           print(f'[{datetime.now().strftime(\"%Y-%m-%d %H:%M:%S\")}] 开始获取汇率数据...')
-          exchange_rate = ExchangeRateManager()
-          rate = exchange_rate.get_usd_cny_rate()
-          if rate:
-              print(f'当前美元/人民币汇率: {rate:.4f}')
+          result = get_usd_cny_latest_rate()
+          if result.get('success'):
+              print(f'当前美元/人民币汇率: {result.get(\"rate\"):.4f}')
+              print(f'日期: {result.get(\"date\")}')
           else:
               print('获取汇率失败')
           "
