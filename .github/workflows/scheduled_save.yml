@@ -93,12 +93,15 @@ jobs:
         run: |
           python -c "
           from datetime import datetime
-          from core.exchange_rate import get_usd_cny_latest_rate
+          from core.exchange_rate import USDCNYExchangeRateFetcher
           print(f'[{datetime.now().strftime(\"%Y-%m-%d %H:%M:%S\")}] 开始获取汇率数据...')
-          result = get_usd_cny_latest_rate()
-          if result.get('success'):
-              print(f'当前美元/人民币汇率: {result.get(\"rate\"):.4f}')
-              print(f'日期: {result.get(\"date\")}')
+          fetcher = USDCNYExchangeRateFetcher()
+          df = fetcher.fetch_historical_rates(force_update=True)
+          if not df.empty:
+              latest = df.iloc[-1]
+              print(f'最新美元/人民币汇率: {latest[\"汇率\"]:.4f}')
+              print(f'日期: {latest[\"日期\"]}')
+              print(f'汇率缓存已更新')
           else:
               print('获取汇率失败')
           "
