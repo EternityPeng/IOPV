@@ -47,10 +47,10 @@ class USDCNYExchangeRateFetcher:
                 today = datetime.now().strftime("%Y-%m-%d")
                 current_time = datetime.now().time()
                 from datetime import time as time_class
-                threshold_time = time_class(9, 20, 0)
+                threshold_time = time_class(9, 15, 0)
                 
-                # 如果缓存是今天的且当前时间大于9:20，直接返回
-                # 或者缓存不是今天但当前时间小于9:20（今日中间价还未公布）
+                # 如果缓存是今天的且当前时间大于9:15，直接返回
+                # 或者缓存不是今天但当前时间小于9:15（今日中间价还未公布）
                 if cache_date == today or (cache_date != today and current_time < threshold_time):
                     df = pd.DataFrame(cache_data.get('data'))
                     return df

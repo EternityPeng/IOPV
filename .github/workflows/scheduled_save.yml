@@ -2,10 +2,18 @@ name: Scheduled NAV Data Save
 
 on:
   schedule:
-    # 北京时间 15:00 = UTC 07:00 (收盘保存)
+    # 北京时间 05:00 = UTC 21:00 (前一天) - 凌晨保存次日净值到CSV
+    # 北京时间周二到周六 05:00 = UTC 周一到周五 21:00
+    - cron: '0 21 * * 1-5'
+    
+    # 北京时间 09:20 = UTC 01:20 - 获取汇率数据
+    # 北京时间周一到周五 09:20 = UTC 周一到周五 01:20
+    - cron: '20 1 * * 1-5'
+    
+    # 北京时间 15:00 = UTC 07:00 - 收盘保存净值到CSV
+    # 北京时间周一到周五 15:00 = UTC 周一到周五 07:00
     - cron: '0 7 * * 1-5'
-    # 北京时间 05:00 = UTC 21:00 (次日保存)
-    - cron: '0 21 * * 0-4'
+  
   workflow_dispatch:  # 允许手动触发
 
 permissions:
@@ -13,17 +21,106 @@ permissions:
 
 env:
   FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
+  TZ: Asia/Shanghai  # 设置时区为北京时间
 
 jobs:
+  # 凌晨5点保存次日净值到CSV（周二到周六）
+  save-morning-data:
+    runs-on: ubuntu-latest
+    # 定时触发(05:00北京时间)或手动触发时运行
+    if: github.event.schedule == '0 21 * * 1-5' || github.event_name == 'workflow_dispatch'
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          persist-credentials: true
+      
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.10'
+      
+      - name: Install Chrome
+        uses: browser-actions/setup-chrome@v1
+      
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r web/requirements.txt
+      
+      - name: Run morning data save (05:00 Beijing)
+        run: |
+          python -c "
+          from web.nav_scheduler import save_next_day_data
+          save_next_day_data()
+          "
+      
+      - name: Commit and push changes
+        run: |
+          git config --local user.email "action@github.com"
+          git config --local user.name "GitHub Action"
+          git add -A
+          BEIJING_TIME=$(TZ='Asia/Shanghai' date '+%Y-%m-%d %H:%M:%S')
+          git diff --quiet && git diff --staged --quiet || git commit -m "Auto save: Morning data at 05:00 Beijing Time ($BEIJING_TIME)"
+          git push
+
+  # 早上9:20获取汇率数据
+  fetch-exchange-rate:
+    runs-on: ubuntu-latest
+    # 定时触发(09:20北京时间)或手动触发时运行
+    if: github.event.schedule == '20 1 * * 1-5' || github.event_name == 'workflow_dispatch'
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          persist-credentials: true
+      
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.10'
+      
+      - name: Install Chrome
+        uses: browser-actions/setup-chrome@v1
+      
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r web/requirements.txt
+      
+      - name: Fetch exchange rate data (09:20 Beijing)
+        run: |
+          python -c "
+          from datetime import datetime
+          from core.exchange_rate import ExchangeRateManager
+          print(f'[{datetime.now().strftime(\"%Y-%m-%d %H:%M:%S\")}] 开始获取汇率数据...')
+          exchange_rate = ExchangeRateManager()
+          rate = exchange_rate.get_usd_cny_rate()
+          if rate:
+              print(f'当前美元/人民币汇率: {rate:.4f}')
+          else:
+              print('获取汇率失败')
+          "
+      
+      - name: Commit and push changes
+        run: |
+          git config --local user.email "action@github.com"
+          git config --local user.name "GitHub Action"
+          git add -A
+          BEIJING_TIME=$(TZ='Asia/Shanghai' date '+%Y-%m-%d %H:%M:%S')
+          git diff --quiet && git diff --staged --quiet || git commit -m "Auto save: Exchange rate data at 09:20 Beijing Time ($BEIJING_TIME)"
+          git push
+
+  # 下午3点收盘保存净值到CSV
   save-close-data:
     runs-on: ubuntu-latest
-    # 定时触发(15:00)或手动触发时运行
+    # 定时触发(15:00北京时间)或手动触发时运行
     if: github.event.schedule == '0 7 * * 1-5' || github.event_name == 'workflow_dispatch'
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
         with:
-          persist-credentials: true  # 保持凭据以便推送
+          persist-credentials: true
       
       - name: Set up Python
         uses: actions/setup-python@v5
@@ -38,51 +135,18 @@ jobs:
           python -m pip install --upgrade pip
           pip install -r web/requirements.txt
       
-      - name: Run close data save
+      - name: Run close data save (15:00 Beijing)
         run: |
-          cd web
-          python nav_scheduler.py close
+          python -c "
+          from web.nav_scheduler import save_close_data
+          save_close_data()
+          "
       
       - name: Commit and push changes
         run: |
           git config --local user.email "action@github.com"
           git config --local user.name "GitHub Action"
           git add -A
-          git diff --quiet && git diff --staged --quiet || git commit -m "Auto save: Close data $(date '+%Y-%m-%d %H:%M')"
-          git push
-
-  save-next-day-data:
-    runs-on: ubuntu-latest
-    # 只在定时触发(05:00)时运行
-    if: github.event.schedule == '0 21 * * 0-4'
-    steps:
-      - name: Checkout repository
-        uses: actions/checkout@v4
-        with:
-          persist-credentials: true  # 保持凭据以便推送
-      
-      - name: Set up Python
-        uses: actions/setup-python@v5
-        with:
-          python-version: '3.10'
-      
-      - name: Install Chrome
-        uses: browser-actions/setup-chrome@v1
-      
-      - name: Install dependencies
-        run: |
-          python -m pip install --upgrade pip
-          pip install -r web/requirements.txt
-      
-      - name: Run next day data save
-        run: |
-          cd web
-          python nav_scheduler.py next_day
-      
-      - name: Commit and push changes
-        run: |
-          git config --local user.email "action@github.com"
-          git config --local user.name "GitHub Action"
-          git add -A
-          git diff --quiet && git diff --staged --quiet || git commit -m "Auto save: Next day data $(date '+%Y-%m-%d %H:%M')"
+          BEIJING_TIME=$(TZ='Asia/Shanghai' date '+%Y-%m-%d %H:%M:%S')
+          git diff --quiet && git diff --staged --quiet || git commit -m "Auto save: Close data at 15:00 Beijing Time ($BEIJING_TIME)"
           git push

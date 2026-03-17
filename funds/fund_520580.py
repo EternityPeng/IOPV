@@ -480,14 +480,155 @@ class Fund520580(BaseFund):
         return result
     
     def _fetch_historical_nav_from_web(self, today: str) -> Optional[dict]:
-        """从网页获取Historical NAV数据"""
+        """从网页获取Historical NAV数据
+        
+        优先级：Selenium -> DrissionPage -> 缓存数据
+        """
+        # 1. 首先尝试 Selenium
+        result = self._fetch_historical_nav_from_web_selenium(today)
+        if result:
+            return result
+        
+        # 2. Selenium 失败，尝试 DrissionPage
+        result = self._fetch_historical_nav_from_web_drissionpage(today)
+        if result:
+            return result
+        
+        # 3. 都失败，返回 None（使用缓存数据）
+        print(f"[{self.fund_code}] Selenium 和 DrissionPage 都失败，使用缓存数据")
+        return None
+    
+    def _fetch_historical_nav_from_web_selenium(self, today: str) -> Optional[dict]:
+        """使用 Selenium 获取 Historical NAV 数据"""
+        try:
+            from selenium import webdriver
+            from selenium.webdriver.common.by import By
+            from selenium.webdriver.support.ui import WebDriverWait
+            from selenium.webdriver.support import expected_conditions as EC
+            from selenium.webdriver.chrome.options import Options
+            from selenium.webdriver.chrome.service import Service
+            from webdriver_manager.chrome import ChromeDriverManager
+            from core.base import get_browser_lock
+            import platform
+            
+            with get_browser_lock():
+                print(f"[{self.fund_code}] 正在使用 Selenium 获取 Historical NAV...")
+                
+                chrome_options = Options()
+                if platform.system() == 'Linux':
+                    chrome_options.add_argument('--headless')
+                chrome_options.add_argument('--no-sandbox')
+                chrome_options.add_argument('--disable-gpu')
+                chrome_options.add_argument('--disable-dev-shm-usage')
+                chrome_options.add_argument('--window-size=1920,1080')
+                chrome_options.add_argument('--user-agent=Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36')
+                
+                service = Service(ChromeDriverManager().install())
+                driver = webdriver.Chrome(service=service, options=chrome_options)
+                
+                try:
+                    driver.get(self.main_url)
+                    time.sleep(5)
+                    
+                    # 点击同意 Cookie 按钮
+                    try:
+                        agree_btn = WebDriverWait(driver, 5).until(
+                            EC.element_to_be_clickable((By.XPATH, '/html/body/div[1]/div[1]/div[10]/div/div/div[3]/div[2]/a[1]'))
+                        )
+                        if agree_btn:
+                            agree_btn.click()
+                            print(f"[{self.fund_code}] 已点击同意 Cookie 按钮")
+                            time.sleep(1)
+                    except Exception as e:
+                        print(f"[{self.fund_code}] 点击同意 Cookie 按钮失败: {e}")
+                    
+                    # 点击 Historical NAVs 按钮
+                    try:
+                        historical_btn = WebDriverWait(driver, 10).until(
+                            EC.presence_of_element_located((By.XPATH, '/html/body/div[1]/div[1]/div[4]/div[1]/div/div[1]/div[9]/div[2]/ul/li[2]/button'))
+                        )
+                        if historical_btn:
+                            driver.execute_script("arguments[0].scrollIntoView({block: 'center'});", historical_btn)
+                            time.sleep(1)
+                            driver.execute_script("arguments[0].click();", historical_btn)
+                            print(f"[{self.fund_code}] 已点击 Historical NAVs 按钮")
+                            time.sleep(3)
+                    except Exception as e:
+                        print(f"[{self.fund_code}] 点击 Historical NAVs 按钮失败: {e}")
+                    
+                    # 解析 Historical NAV 表格
+                    historical_nav_list = {'date': [], 'nav': []}
+                    
+                    try:
+                        table = WebDriverWait(driver, 10).until(
+                            EC.presence_of_element_located((By.ID, 'dtHistoricalPricing'))
+                        )
+                        if table:
+                            print(f"[{self.fund_code}] Historical NAV 表格已找到")
+                            tbody = table.find_element(By.TAG_NAME, 'tbody')
+                            if tbody:
+                                rows = tbody.find_elements(By.TAG_NAME, 'tr')
+                                for row in rows:
+                                    cells = row.find_elements(By.TAG_NAME, 'td')
+                                    if len(cells) >= 2:
+                                        nav_str = cells[0].text.strip()
+                                        date_str = cells[1].text.strip()
+                                        
+                                        if nav_str == 'NAV Price' or date_str == 'Date':
+                                            continue
+                                        
+                                        try:
+                                            nav_value = float(nav_str)
+                                            historical_nav_list['date'].append(date_str)
+                                            historical_nav_list['nav'].append(nav_value)
+                                        except:
+                                            pass
+                                
+                                if historical_nav_list['date']:
+                                    print(f"[{self.fund_code}] 成功获取 Historical NAV 数据: {len(historical_nav_list['date'])} 条记录")
+                    except Exception as e:
+                        print(f"[{self.fund_code}] 解析 Historical NAV 表格失败: {e}")
+                    
+                    # 保存到缓存
+                    if historical_nav_list['date']:
+                        nav_dict = {}
+                        for date_str, nav_value in zip(historical_nav_list['date'], historical_nav_list['nav']):
+                            try:
+                                dt = datetime.strptime(date_str, "%d-%b-%y")
+                                formatted_date = dt.strftime("%Y-%m-%d")
+                                nav_dict[formatted_date] = nav_value
+                            except:
+                                pass
+                        
+                        cache_data = {
+                            'cache_date': today,
+                            'data': nav_dict
+                        }
+                        with open(self.historical_nav_cache_file, 'w', encoding='utf-8') as f:
+                            json.dump(cache_data, f, ensure_ascii=False, indent=2)
+                        print(f"[{self.fund_code}] Historical NAV 数据已更新: {len(nav_dict)} 条记录")
+                        return nav_dict
+                    
+                finally:
+                    driver.quit()
+                    print(f"[{self.fund_code}] 浏览器已关闭")
+        
+        except ImportError:
+            print(f"[{self.fund_code}] Selenium 未安装，跳过 Selenium 获取")
+        except Exception as e:
+            print(f"[{self.fund_code}] Selenium 获取失败: {e}")
+        
+        return None
+    
+    def _fetch_historical_nav_from_web_drissionpage(self, today: str) -> Optional[dict]:
+        """使用 DrissionPage 获取 Historical NAV 数据"""
         try:
             from core.base import get_browser_lock
             from DrissionPage import ChromiumPage, ChromiumOptions
             import platform
             
             with get_browser_lock():
-                print(f"[{self.fund_code}] 正在使用浏览器获取Historical NAV...")
+                print(f"[{self.fund_code}] 正在使用 DrissionPage 获取 Historical NAV...")
                 
                 co = ChromiumOptions()
                 if platform.system() == 'Linux':
@@ -498,7 +639,7 @@ class Fund520580(BaseFund):
                 
                 page = ChromiumPage(addr_or_opts=co)
                 print("浏览器已启动，正在获取Historical NAV...")
-                page.get(self.main_url, timeout=60)
+                page.get(self.main_url, timeout=120)
                 
                 # 点击同意cookie按钮
                 try:
@@ -577,16 +718,13 @@ class Fund520580(BaseFund):
                     return nav_dict
                 
                 page.quit()
-                print("浏览器已关闭")
-                
-            return None
-                    
+        
         except ImportError:
-            print(f"[{self.fund_code}] DrissionPage 未安装，跳过浏览器获取")
-            return None
+            print(f"[{self.fund_code}] DrissionPage 未安装，跳过 DrissionPage 获取")
         except Exception as e:
-            print(f"[{self.fund_code}] 浏览器获取失败: {e}")
-            return None
+            print(f"[{self.fund_code}] DrissionPage 获取失败: {e}")
+        
+        return None
     
     def _get_cached_intraday_nav(self) -> dict:
         """从缓存获取Intraday NAV"""

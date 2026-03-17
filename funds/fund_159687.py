@@ -1,45 +1,41 @@
 """
-520580 新兴亚洲ETF 估值模块
-
-Lion-China Merchants Emerging Asia Select Index ETF
-跟踪iEdge Emerging Asia Select 50 Index，投资新兴亚洲市场
+159687 南方东英富时亚太低碳精选ETF 估值模块
 """
 
 import requests
-from datetime import datetime
+from datetime import datetime, timedelta
 import os
 import json
 import time
 from typing import Optional
-import re
 
 from core.base import BaseFund, FundData
 from core.nav_history import NavHistoryManager
 
 
-class Fund520580(BaseFund):
+class Fund159687(BaseFund):
     """
-    新兴亚洲ETF (520580)
+    南方东英富时亚太低碳精选ETF (159687)
     
     估值方法：
-    1. 从Lion Global Investors网页获取Intraday Indicative NAV (美元/新加坡元)
-    2. 从Lion Global Investors网页获取Historical NAV (美元)
-    3. 从新浪财经获取市场价格 (人民币)
-    4. 从akshare获取最新基金净值 (人民币)
+    1. 从ICE API获取Intraday NAV (美元)
+    2. 从新浪财经获取市场价格 (人民币)
+    3. 从akshare获取最新基金净值 (人民币)
+    4. 从CSOP官网获取Historical NAV (美元)
     5. 计算NAV涨跌幅和估算实时净值
     """
     
     @property
     def fund_code(self) -> str:
-        return "520580"
+        return "159687"
     
     @property
     def fund_name(self) -> str:
-        return "新兴亚洲ETF"
+        return "南方东英富时亚太低碳精选ETF"
     
     @property
     def description(self) -> str:
-        return "跟踪iEdge Emerging Asia Select 50 Index，投资新兴亚洲市场50只精选股票"
+        return "追踪富时亚太低碳指数，投资亚太地区低碳概念股票"
     
     @property
     def update_interval(self) -> int:
@@ -49,7 +45,9 @@ class Fund520580(BaseFund):
         super().__init__(base_dir)
         
         # API URLs
-        self.main_url = "https://www.lionglobalinvestors.com/en/fund-lion-china-merchants-emerging-asia-select-index-etf.html"
+        self.main_url = "https://www.csopasset.com/sg/en/products/sg-carbon/etf.php"
+        self.iframe_url = "https://csopasset.factsetdigitalsolutions.com/application/index/quote?s=LCU-SG"
+        self.api_url = "https://inav.ice.com/api/1/csop/application/index/quote?symbol=LCU-SG&language=en"
         
         # 缓存文件
         self.cache_dir = self.get_cache_dir()
@@ -63,8 +61,9 @@ class Fund520580(BaseFund):
     def calculate(self) -> FundData:
         """计算估值数据"""
         # 1. 获取实时净值
-        nav_data = self._get_nav_from_web()
-        intraday_result = nav_data.get('intraday')
+        intraday_result = self._get_intraday_nav_from_api()
+        if intraday_result is None or intraday_result.get('nav_usd') is None:
+            intraday_result = self._get_intraday_nav()
         
         # 2. 获取市场价格
         market_price_info = self._get_market_price()
@@ -72,10 +71,14 @@ class Fund520580(BaseFund):
         # 3. 获取最新基金净值
         latest_nav = self._get_latest_nav()
         
-        # 4. 获取共同日期净值（包含A股净值和官网Historical NAV）
+        # 4. 获取共同日期净值
         common_date_result = self._get_common_date_nav()
         
-        # 5. 获取汇率数据
+        # 5. 获取Historical NAV（使用共同日期）
+        target_date = common_date_result.get('date') if common_date_result else None
+        historical_nav = self._get_historical_nav_by_date(target_date) if target_date else None
+        
+        # 6. 获取汇率数据
         usd_cny_rate = None
         usd_cny_change_pct = None
         usd_cny_rate_on_common_date = None
@@ -91,18 +94,10 @@ class Fund520580(BaseFund):
                 if common_date_result and common_date_result.get('date'):
                     common_date = common_date_result['date']
                     
-                    # 检查日期格式，如果是 '27-Feb-2026' 格式，需要转换为 '2026-02-27'
-                    if '-' in common_date and len(common_date.split('-')[0]) != 4:
-                        # 格式为 '27-Feb-2026'
-                        from datetime import datetime
-                        dt = datetime.strptime(common_date, "%d-%b-%Y")
-                        common_date_str = dt.strftime("%Y-%m-%d")
-                    else:
-                        # 格式已经是 '2026-02-27'
-                        common_date_str = common_date
+                    # common_date 已经是 'YYYY-MM-DD' 格式
                     
                     # 获取共同日期的汇率
-                    usd_cny_rate_on_common_date = get_usd_cny_rate_by_date(common_date_str)
+                    usd_cny_rate_on_common_date = get_usd_cny_rate_by_date(common_date)
                     
                     if usd_cny_rate_on_common_date and usd_cny_rate:
                         # 计算汇率涨跌幅
@@ -110,15 +105,15 @@ class Fund520580(BaseFund):
         except Exception as e:
             print(f"获取美元兑人民币汇率失败: {e}")
         
-        # 6. 计算NAV涨跌幅（使用共同日期的Historical NAV）
+        # 7. 计算NAV涨跌幅
         nav_change_result = None
-        if common_date_result and common_date_result.get('official_nav') and intraday_result and intraday_result.get('nav_usd'):
+        if historical_nav and intraday_result and intraday_result.get('nav_usd'):
             nav_change_result = self._calculate_nav_change(
-                common_date_result['official_nav'], 
+                historical_nav.get('nav'), 
                 intraday_result.get('nav_usd')
             )
         
-        # 7. 估算实时净值（考虑汇率因素）
+        # 8. 估算实时净值（考虑汇率因素）
         estimated_nav = None
         premium_discount = None
         if nav_change_result and common_date_result and common_date_result.get('nav'):
@@ -149,8 +144,8 @@ class Fund520580(BaseFund):
             latest_nav_date=latest_nav.get('date') if latest_nav else None,
             intraday_nav=intraday_result.get('nav_usd') if intraday_result else None,
             intraday_nav_time=intraday_result.get('time') if intraday_result else None,
-            historical_nav=common_date_result.get('official_nav') if common_date_result else None,
-            historical_nav_date=common_date_result.get('date') if common_date_result else None,
+            historical_nav=historical_nav.get('nav') if historical_nav else None,
+            historical_nav_date=historical_nav.get('date') if historical_nav else None,
             nav_change_pct=nav_change_result.get('change_pct') if nav_change_result else None,
             common_date_nav=common_date_result.get('nav') if common_date_result else None,
             common_date=common_date_result.get('date') if common_date_result else None,
@@ -175,15 +170,18 @@ class Fund520580(BaseFund):
             # 检查官网历史净值缓存是否存在，如果不存在则获取
             if not os.path.exists(self.historical_nav_cache_file):
                 print(f"[{self.fund_code}] 官网历史净值缓存文件不存在，正在获取...")
-                # 触发获取历史净值数据
-                nav_data = self._get_nav_from_web()
-                if nav_data and nav_data.get('historical'):
-                    # 成功获取到数据
-                    pass
+                # 获取最近15天的日期，尝试获取历史净值
+                from datetime import datetime, timedelta
+                today = datetime.now()
+                for i in range(15):
+                    target_date = (today - timedelta(days=i)).strftime("%Y-%m-%d")
+                    result = self._get_historical_nav_by_date(target_date)
+                    if result:
+                        break
             
             # 再次检查缓存是否存在
             if not os.path.exists(self.historical_nav_cache_file):
-                print(f"[{self.fund_code}] 获取官网历史净值失败")
+                print("获取官网历史净值失败")
                 return None
             
             with open(self.historical_nav_cache_file, 'r', encoding='utf-8') as f:
@@ -221,375 +219,63 @@ class Fund520580(BaseFund):
             print(f"获取共同日期净值失败: {e}")
             return None
     
-    def _get_fund_security_id(self) -> Optional[str]:
-        """从网页获取fundSecurityId"""
-        try:
-            headers = {'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36'}
-            response = requests.get(self.main_url, headers=headers, timeout=30)
-            
-            # 搜索fundSecurityId
-            import re
-            match = re.search(r'meta\s+property=["\']og:fundSecurityId["\']\s+content=["\']([^"\']+)["\']', response.text, re.IGNORECASE)
-            if match:
-                return match.group(1)
-            
-            # 尝试另一种格式
-            match = re.search(r'content=["\']([^"\']+)["\']\s+property=["\']og:fundSecurityId["\']', response.text, re.IGNORECASE)
-            if match:
-                return match.group(1)
-            
-            print(f"[{self.fund_code}] 未找到fundSecurityId")
-            return None
-            
-        except Exception as e:
-            print(f"获取fundSecurityId失败: {e}")
-            return None
-    
-    def _get_nav_from_web(self) -> dict:
-        """从Lion Global Investors网页获取Intraday NAV和Historical NAV"""
-        result = {
-            'intraday': None,
-            'historical': None
-        }
+    def _get_intraday_nav_from_api(self) -> Optional[dict]:
+        """从ICE API获取实时净值"""
+        max_retries = 3
+        retry_count = 0
         
-        # Historical NAV：检查缓存是否存在且创建日期是今日
-        today = datetime.now().strftime("%Y-%m-%d")
-        cached_historical = None
-        need_fetch_historical = True
-        
-        if os.path.exists(self.historical_nav_cache_file):
+        while retry_count < max_retries:
             try:
-                with open(self.historical_nav_cache_file, 'r', encoding='utf-8') as f:
-                    cache_data = json.load(f)
-                cache_date = cache_data.get('cache_date', '')
-                if cache_date == today:
-                    cached_historical = cache_data.get('data')
-                    result['historical'] = cached_historical
-                    print(f"[{self.fund_code}] 使用今天的缓存数据")
-                    need_fetch_historical = False
-                else:
-                    print(f"[{self.fund_code}] 缓存日期({cache_date})不是今天，尝试获取新数据...")
-            except Exception as e:
-                print(f"[{self.fund_code}] 读取缓存失败: {e}")
-        else:
-            print(f"[{self.fund_code}] 缓存文件不存在，尝试获取新数据...")
-        
-        # Intraday NAV需要实时爬取
-        try:
-            # print("正在从Lion Global Investors API获取Intraday NAV数据...")
-            
-            # 首先获取fundSecurityId
-            fund_security_id = self._get_fund_security_id()
-            if fund_security_id:
-                # 调用API获取Intraday NAV
-                api_url = f"https://api.lionglobalinvestors.com/markitapi?fundSecurityId={fund_security_id}&format=2"
-                headers = {'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36'}
+                response = requests.get(
+                    self.api_url, 
+                    headers={
+                        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36",
+                        "Accept": "application/json"
+                    },
+                    timeout=30
+                )
+                response.raise_for_status()
                 
-                api_response = requests.get(api_url, headers=headers, timeout=30)
-                if api_response.status_code == 200:
-                    api_data = api_response.json()
-                    
-                    # 解析API数据
-                    intraday_result = {
-                        'date': None,
-                        'time': None,
-                        'nav_usd': None,
-                        'nav_sgd': None
-                    }
-                    
-                    # 获取SGD数据
-                    if 'SGD' in api_data:
-                        sgd_data = api_data['SGD']
-                        intraday_result['nav_sgd'] = sgd_data.get('values')
-                        if sgd_data.get('timeStamp'):
-                            try:
-                                dt = datetime.fromisoformat(sgd_data['timeStamp'].replace('Z', '+00:00'))
-                                intraday_result['time'] = dt.strftime("%Y-%m-%d %H:%M:%S")
-                                intraday_result['date'] = dt.strftime("%d-%b-%Y")
-                            except:
-                                pass
-                    
-                    # 获取USD数据
-                    if 'USD' in api_data:
-                        usd_data = api_data['USD']
-                        intraday_result['nav_usd'] = usd_data.get('values')
-                    
-                    # 保存Intraday NAV到缓存
-                    if intraday_result.get('nav_usd'):
-                        self._save_intraday_nav_cache(intraday_result)
-                        result['intraday'] = intraday_result
-                        # print(f"Intraday NAV已获取: {intraday_result}")
-                else:
-                    print(f"API请求失败: {api_response.status_code}")
-                    # 如果API获取失败，使用浏览器获取
-                    result = self._get_nav_from_browser(result, need_fetch_historical, today)
-            else:
-                print(f"[{self.fund_code}] 未找到fundSecurityId，使用浏览器获取数据")
-                # 如果API获取失败，使用浏览器获取
-                result = self._get_nav_from_browser(result, need_fetch_historical, today)
-            
-            # 如果需要获取Historical NAV，则从网页获取
-            if need_fetch_historical and not result.get('historical'):
-                result = self._fetch_historical_nav_from_browser(result, today)
-            
-        except Exception as e:
-            print(f"获取NAV数据失败: {e}")
-            # Intraday NAV获取失败时，使用缓存作为备用
-            if not result['intraday']:
-                result['intraday'] = self._get_cached_intraday_nav()
-            # Historical NAV获取失败时，使用缓存
-            if not result['historical']:
-                result['historical'] = cached_historical
-        
-        # print(f"返回结果: Intraday={result['intraday'] is not None}, Historical={result['historical'] is not None}")
-        return result
-    
-    def _get_nav_from_browser(self, result: dict, need_fetch_historical: bool, today: str) -> dict:
-        """使用浏览器获取NAV数据"""
-        try:
-            from core.base import get_browser_lock
-            from DrissionPage import ChromiumPage, ChromiumOptions
-            import time
-            import platform
-            
-            # 使用浏览器锁保护浏览器操作
-            with get_browser_lock():
-                print(f"[{self.fund_code}] 正在使用浏览器获取NAV数据...")
+                data = response.json()
                 
-                # 配置浏览器选项
-                co = ChromiumOptions()
-                
-                # Linux 环境需要特殊配置
-                if platform.system() == 'Linux':
-                    co.headless(True)  # 无头模式
-                    co.set_argument('--no-sandbox')  # 禁用沙箱
-                    co.set_argument('--disable-gpu')  # 禁用 GPU
-                    co.set_argument('--disable-dev-shm-usage')  # 禁用 /dev/shm 使用
-                
-                page = ChromiumPage(addr_or_opts=co)
-                print("浏览器已启动")
-                print("正在加载网页...")
-                page.get(self.main_url, timeout=60)
-                print("网页已加载，等待数据加载...")
-                time.sleep(3)  # 等待3秒让数据加载
-                print("数据加载完成")
-                
-                # 解析Intraday NAV
-                intraday_result = {
+                result = {
                     'date': None,
                     'time': None,
-                    'nav_usd': None,
-                    'nav_sgd': None
+                    'nav_usd': None
                 }
                 
-                # 使用XPath获取数据容器
-                data_container = page.ele('xpath:/html/body/div[1]/div[1]/div[3]/div/div[3]', timeout=5)
-                if data_container:
-                    container_text = data_container.text
-                    print("数据容器已找到")
-                    
-                    intraday_match = re.search(
-                        r'IntraDay Indicative NAV\s+as of\s+([\d-]+),\s+([\d:]+)\s+SGD\s+([\d.]+)\s+\*+\s+USD\s+([\d.]+)',
-                        container_text,
-                        re.IGNORECASE
-                    )
-                    if intraday_match:
-                        date_str = intraday_match.group(1)
-                        time_str = intraday_match.group(2)
-                        intraday_result['nav_sgd'] = float(intraday_match.group(3))
-                        intraday_result['nav_usd'] = float(intraday_match.group(4))
-                        print(f"Intraday NAV已解析: {intraday_result}")
-                        
-                        try:
-                            dt = datetime.strptime(f"{date_str} {time_str}", "%Y-%m-%d %H:%M:%S")
-                            intraday_result['time'] = dt.strftime("%Y-%m-%d %H:%M:%S")
-                            intraday_result['date'] = dt.strftime("%d-%b-%Y")
-                        except:
-                            pass
+                if 'quote' in data and 'rows' in data['quote'] and len(data['quote']['rows']) > 0:
+                    row = data['quote']['rows'][0]
+                    result['date'] = row.get('date', None)
+                    result['time'] = row.get('time', None)
+                    if 'values' in row and len(row['values']) > 1:
+                        result['nav_usd'] = float(row['values'][1])
                 
-                # 保存Intraday NAV到缓存
-                if intraday_result.get('nav_usd'):
-                    self._save_intraday_nav_cache(intraday_result)
-                    result['intraday'] = intraday_result
+                if result['date'] and result['time']:
+                    try:
+                        date_obj = datetime.strptime(result['date'], "%d %b %Y")
+                        time_obj = datetime.strptime(result['time'], "%I:%M %p")
+                        combined_datetime = datetime.combine(date_obj.date(), time_obj.time())
+                        result['time'] = combined_datetime.strftime("%Y-%m-%d %H:%M:%S")
+                        result['date'] = date_obj.strftime("%d-%b-%Y")
+                    except Exception:
+                        pass
                 
-                page.quit()
-                print("浏览器已关闭")
-            
-        except Exception as e:
-            print(f"浏览器获取NAV数据失败: {e}")
-        
-        return result
-    
-    def _fetch_historical_nav_from_browser(self, result: dict, today: str) -> dict:
-        """使用浏览器获取Historical NAV数据
-        
-        逻辑：
-        1. 检查缓存是否存在
-        2. 如果缓存日期不是今天，尝试用浏览器获取新数据
-        3. 如果浏览器获取失败，使用缓存数据
-        """
-        cache_nav_dict = {}
-        
-        # 1. 检查缓存是否存在
-        if os.path.exists(self.historical_nav_cache_file):
-            try:
-                with open(self.historical_nav_cache_file, 'r', encoding='utf-8') as f:
-                    cache_data = json.load(f)
+                self._save_intraday_nav_cache(result)
+                return result
                 
-                # 统一格式: {'data': {"YYYY-MM-DD": 净值}}
-                cache_nav_dict = cache_data.get('data', {})
-                
-                # 检查缓存日期是否是今天
-                cache_date = cache_data.get('cache_date', '')
-                if cache_date != today:
-                    print(f"[{self.fund_code}] 缓存日期({cache_date})不是今天，尝试获取新数据...")
-                    
-                    # 2. 尝试用浏览器获取新数据
-                    new_data = self._fetch_historical_nav_from_web(today)
-                    if new_data:
-                        cache_nav_dict = new_data
-                    else:
-                        print(f"[{self.fund_code}] 浏览器获取失败，使用缓存数据")
-                else:
-                    print(f"[{self.fund_code}] 使用今天的缓存数据")
-                    
             except Exception as e:
-                print(f"[{self.fund_code}] 读取缓存失败: {e}")
-                # 尝试用浏览器获取
-                new_data = self._fetch_historical_nav_from_web(today)
-                if new_data:
-                    cache_nav_dict = new_data
-        else:
-            # 没有缓存，尝试用浏览器获取
-            print(f"[{self.fund_code}] 缓存不存在，尝试获取新数据...")
-            new_data = self._fetch_historical_nav_from_web(today)
-            if new_data:
-                cache_nav_dict = new_data
+                retry_count += 1
+                if retry_count < max_retries:
+                    time.sleep(2)
+                else:
+                    print(f"ICE API获取失败: {e}")
+                    return None
         
-        # 3. 返回结果（获取最新日期的数据）
-        if cache_nav_dict:
-            # 获取最新的日期
-            sorted_dates = sorted(cache_nav_dict.keys(), reverse=True)
-            if sorted_dates:
-                latest_date = sorted_dates[0]
-                result['historical'] = {
-                    'date': latest_date,
-                    'nav': cache_nav_dict[latest_date]
-                }
-        
-        return result
+        return None
     
-    def _fetch_historical_nav_from_web(self, today: str) -> Optional[dict]:
-        """从网页获取Historical NAV数据"""
-        try:
-            from core.base import get_browser_lock
-            from DrissionPage import ChromiumPage, ChromiumOptions
-            import platform
-            
-            with get_browser_lock():
-                print(f"[{self.fund_code}] 正在使用浏览器获取Historical NAV...")
-                
-                co = ChromiumOptions()
-                if platform.system() == 'Linux':
-                    co.headless(True)
-                    co.set_argument('--no-sandbox')
-                    co.set_argument('--disable-gpu')
-                    co.set_argument('--disable-dev-shm-usage')
-                
-                page = ChromiumPage(addr_or_opts=co)
-                print("浏览器已启动，正在获取Historical NAV...")
-                page.get(self.main_url, timeout=60)
-                
-                # 点击同意cookie按钮
-                try:
-                    agree_btn = page.ele('xpath:/html/body/div[1]/div[1]/div[10]/div/div/div[3]/div[2]/a[1]', timeout=5)
-                    if agree_btn:
-                        agree_btn.click()
-                        page.wait(1)
-                        print("已点击同意cookie按钮")
-                except Exception as e:
-                    print(f"点击同意cookie按钮失败: {e}")
-                
-                # 点击Historical NAVs按钮
-                try:
-                    historical_btn = page.ele('xpath:/html/body/div[1]/div[1]/div[4]/div[1]/div/div[1]/div[9]/div[2]/ul/li[2]/button', timeout=5)
-                    if historical_btn:
-                        historical_btn.click()
-                        page.wait(2)
-                        print("已点击Historical NAVs按钮")
-                except Exception as e:
-                    print(f"点击Historical NAVs按钮失败: {e}")
-                
-                # 解析Historical NAV表格
-                historical_nav_list = {
-                    'date': [],
-                    'nav': []
-                }
-                
-                try:
-                    table = page.ele('#dtHistoricalPricing', timeout=5)
-                    if table:
-                        print("Historical NAV表格已找到")
-                        tbody = table.ele('tag:tbody')
-                        if tbody:
-                            rows = tbody.eles('tag:tr')
-                            for row in rows:
-                                cells = row.eles('tag:td')
-                                if len(cells) >= 2:
-                                    nav_str = cells[0].text.strip()
-                                    date_str = cells[1].text.strip()
-                                    
-                                    if nav_str == 'NAV Price' or date_str == 'Date':
-                                        continue
-                                    
-                                    try:
-                                        nav_value = float(nav_str)
-                                        historical_nav_list['date'].append(date_str)
-                                        historical_nav_list['nav'].append(nav_value)
-                                    except:
-                                        pass
-                            
-                            if historical_nav_list['date']:
-                                print(f"成功获取Historical NAV数据: {len(historical_nav_list['date'])}条记录")
-                except Exception as e:
-                    print(f"解析Historical NAV表格失败: {e}")
-                
-                # 保存到缓存 - 统一字典格式
-                if historical_nav_list['date']:
-                    # 转换为字典格式 {"YYYY-MM-DD": 净值}
-                    nav_dict = {}
-                    for date_str, nav_value in zip(historical_nav_list['date'], historical_nav_list['nav']):
-                        # 将日期格式从 "DD-Mon-YY" 转换为 "YYYY-MM-DD"
-                        try:
-                            dt = datetime.strptime(date_str, "%d-%b-%y")
-                            formatted_date = dt.strftime("%Y-%m-%d")
-                            nav_dict[formatted_date] = nav_value
-                        except:
-                            pass
-                    
-                    cache_data = {
-                        'cache_date': today,
-                        'data': nav_dict
-                    }
-                    with open(self.historical_nav_cache_file, 'w', encoding='utf-8') as f:
-                        json.dump(cache_data, f, ensure_ascii=False, indent=2)
-                    print(f"[{self.fund_code}] Historical NAV数据已更新: {len(nav_dict)}条记录")
-                    return nav_dict
-                
-                page.quit()
-                print("浏览器已关闭")
-                
-            return None
-                    
-        except ImportError:
-            print(f"[{self.fund_code}] DrissionPage 未安装，跳过浏览器获取")
-            return None
-        except Exception as e:
-            print(f"[{self.fund_code}] 浏览器获取失败: {e}")
-            return None
-    
-    def _get_cached_intraday_nav(self) -> dict:
-        """从缓存获取Intraday NAV"""
+    def _get_intraday_nav(self) -> dict:
+        """从iframe页面获取实时净值（备用方法）"""
         try:
             if os.path.exists(self.intraday_nav_cache_file):
                 with open(self.intraday_nav_cache_file, 'r', encoding='utf-8') as f:
@@ -601,21 +287,6 @@ class Fund520580(BaseFund):
             pass
         
         return {'date': 'N/A', 'time': 'N/A', 'nav_usd': None}
-    
-    def _get_cached_historical_nav(self) -> Optional[dict]:
-        """从缓存获取Historical NAV
-        
-        返回格式: {"YYYY-MM-DD": 净值}
-        """
-        try:
-            if os.path.exists(self.historical_nav_cache_file):
-                with open(self.historical_nav_cache_file, 'r', encoding='utf-8') as f:
-                    cache_data = json.load(f)
-                return cache_data.get('data', {})
-        except Exception:
-            pass
-        
-        return None
     
     def _save_intraday_nav_cache(self, data: dict):
         """保存实时净值缓存"""
@@ -630,28 +301,12 @@ class Fund520580(BaseFund):
         except Exception as e:
             print(f"保存缓存失败: {e}")
     
-    def _calculate_nav_change(self, historical_nav, intraday_nav) -> Optional[dict]:
-        """计算NAV涨跌幅"""
-        try:
-            # 确保转换为浮点数
-            historical_nav = float(historical_nav) if historical_nav is not None else None
-            intraday_nav = float(intraday_nav) if intraday_nav is not None else None
-            
-            if historical_nav and intraday_nav and historical_nav > 0:
-                change = intraday_nav - historical_nav
-                change_pct = (change / historical_nav) * 100
-                return {
-                    'change': change,
-                    'change_pct': change_pct
-                }
-        except (ValueError, TypeError):
-            pass
-        return None
-    
     def _get_market_price(self) -> Optional[dict]:
         """获取市场价格"""
         try:
-            url = "http://hq.sinajs.cn/list=sh520580"
+            import re
+            
+            url = "http://hq.sinajs.cn/list=sz159687"
             headers = {
                 "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36",
                 "Referer": "https://finance.sina.com.cn/"
@@ -698,22 +353,12 @@ class Fund520580(BaseFund):
                 if cache_data.get('cache_date') == today:
                     return cache_data.get('data')
             
-            df = ak.fund_etf_fund_info_em(fund='520580')
+            df = ak.fund_etf_fund_info_em(fund='159687')
             latest_row = df.iloc[-1]
             
-            # 使用 .item() 方法获取标量值，避免 NaN 问题
-            nav_value = latest_row['单位净值']
-            date_value = latest_row['净值日期']
-            
-            # 检查是否为 NaN
-            import pandas as pd
-            if pd.isna(nav_value) or pd.isna(date_value):
-                print(f"获取到的数据无效: nav={nav_value}, date={date_value}")
-                return None
-            
             result = {
-                'nav': float(nav_value),
-                'date': str(date_value)
+                'nav': float(latest_row['单位净值']),
+                'date': str(latest_row['净值日期'])
             }
             
             cache_data = {
@@ -735,18 +380,11 @@ class Fund520580(BaseFund):
     def _save_a_historical_nav(self, df):
         """保存A股历史净值到缓存"""
         try:
-            import pandas as pd
-            
             a_historical_nav = {}
             for _, row in df.iterrows():
                 date_str = str(row['净值日期'])
-                nav = row['单位净值']
-                
-                # 检查是否为 NaN
-                if pd.isna(date_str) or pd.isna(nav) or date_str == 'nan' or date_str == 'NaT':
-                    continue
-                
-                a_historical_nav[date_str] = float(nav)
+                nav = float(row['单位净值'])
+                a_historical_nav[date_str] = nav
             
             cache_data = {
                 'cache_date': datetime.now().strftime("%Y-%m-%d"),
@@ -758,3 +396,372 @@ class Fund520580(BaseFund):
                 json.dump(cache_data, f, ensure_ascii=False, indent=2)
         except Exception as e:
             print(f"保存A股历史净值失败: {e}")
+    
+    def _get_historical_nav_by_date(self, target_date: str) -> Optional[dict]:
+        """获取指定日期的历史净值
+        
+        统一格式: {"YYYY-MM-DD": 净值}
+        """
+        try:
+            today = datetime.now().strftime("%Y-%m-%d")
+            cache_nav_dict = {}
+            
+            # 1. 检查缓存是否存在
+            if os.path.exists(self.historical_nav_cache_file):
+                with open(self.historical_nav_cache_file, 'r', encoding='utf-8') as f:
+                    cache_data = json.load(f)
+                
+                # 统一格式: {'data': {"YYYY-MM-DD": 净值}}
+                cache_nav_dict = cache_data.get('data', {})
+                
+                # 检查缓存日期是否是今天
+                cache_date = cache_data.get('cache_date', '')
+                if cache_date != today:
+                    print(f"[{self.fund_code}] 缓存日期({cache_date})不是今天，尝试获取新数据...")
+                    
+                    # 2. 尝试用浏览器获取新数据
+                    new_data = self._fetch_historical_nav_from_browser(today)
+                    if new_data:
+                        cache_nav_dict = new_data
+                    else:
+                        print(f"[{self.fund_code}] 浏览器获取失败，使用缓存数据")
+                else:
+                    print(f"[{self.fund_code}] 使用今天的缓存数据")
+            else:
+                # 缓存文件不存在，尝试获取新数据
+                print(f"[{self.fund_code}] 缓存文件不存在，尝试获取新数据...")
+                new_data = self._fetch_historical_nav_from_browser(today)
+                if new_data:
+                    cache_nav_dict = new_data
+            
+            # 3. 从数据中查找目标日期
+            if cache_nav_dict and target_date in cache_nav_dict:
+                nav = cache_nav_dict[target_date]
+                if nav is not None:
+                    return {
+                        'date': target_date,
+                        'nav': float(nav)
+                    }
+            
+            print(f"[{self.fund_code}] 缓存中未找到目标日期 {target_date} 的数据")
+            return None
+            
+        except Exception as e:
+            print(f"获取Historical NAV失败: {e}")
+            return None
+    
+    def _fetch_historical_nav_from_browser(self, today: str) -> Optional[dict]:
+        """使用浏览器获取Historical NAV数据
+        
+        优先级：Selenium -> DrissionPage -> 缓存数据
+        """
+        # 1. 首先尝试 Selenium
+        result = self._fetch_historical_nav_from_browser_selenium(today)
+        if result:
+            return result
+        
+        # 2. Selenium 失败，尝试 DrissionPage
+        result = self._fetch_historical_nav_from_browser_drissionpage(today)
+        if result:
+            return result
+        
+        # 3. 都失败，返回 None（使用缓存数据）
+        print(f"[{self.fund_code}] Selenium 和 DrissionPage 都失败，使用缓存数据")
+        return None
+    
+    def _fetch_historical_nav_from_browser_selenium(self, today: str) -> Optional[dict]:
+        """使用 Selenium 获取 Historical NAV 数据"""
+        try:
+            from selenium import webdriver
+            from selenium.webdriver.common.by import By
+            from selenium.webdriver.support.ui import WebDriverWait
+            from selenium.webdriver.support import expected_conditions as EC
+            from selenium.webdriver.chrome.options import Options
+            from selenium.webdriver.chrome.service import Service
+            from webdriver_manager.chrome import ChromeDriverManager
+            from core.base import get_browser_lock
+            import platform
+            
+            with get_browser_lock():
+                print(f"[{self.fund_code}] 正在使用 Selenium 获取 Historical NAV...")
+                
+                chrome_options = Options()
+                if platform.system() == 'Linux':
+                    chrome_options.add_argument('--headless')
+                chrome_options.add_argument('--no-sandbox')
+                chrome_options.add_argument('--disable-gpu')
+                chrome_options.add_argument('--disable-dev-shm-usage')
+                chrome_options.add_argument('--window-size=1920,1080')
+                chrome_options.add_argument('--user-agent=Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36')
+                
+                service = Service(ChromeDriverManager().install())
+                driver = webdriver.Chrome(service=service, options=chrome_options)
+                
+                try:
+                    driver.get(self.main_url)
+                    time.sleep(3)
+                    
+                    # 点击同意 Cookie 按钮
+                    try:
+                        agree_btn = WebDriverWait(driver, 3).until(
+                            EC.element_to_be_clickable((By.ID, "StateAccept"))
+                        )
+                        if agree_btn:
+                            agree_btn.click()
+                            time.sleep(1)
+                    except:
+                        pass
+                    
+                    # 滚动页面
+                    driver.execute_script("window.scrollTo(0, 1500)")
+                    time.sleep(1)
+                    
+                    # 点击 Historical NAVs 标签
+                    try:
+                        historical_tab = WebDriverWait(driver, 5).until(
+                            EC.element_to_be_clickable((By.XPATH, "//*[contains(text(), 'Historical NAVs')]"))
+                        )
+                        if historical_tab:
+                            historical_tab.click()
+                            time.sleep(5)
+                    except:
+                        pass
+                    
+                    # 等待图表数据加载，最多等待120秒
+                    chart_data = None
+                    max_wait_time = 120
+                    wait_interval = 3
+                    elapsed_time = 0
+                    
+                    while elapsed_time < max_wait_time:
+                        chart_data = driver.execute_script("""
+                            var chartDom = document.getElementById('PerformChart');
+                            if (chartDom && typeof echarts !== 'undefined') {
+                                var chart = echarts.getInstanceByDom(chartDom);
+                                if (chart) {
+                                    var option = chart.getOption();
+                                    if (option && option.xAxis && option.xAxis[0] && option.xAxis[0].data && option.xAxis[0].data.length > 0) {
+                                        return JSON.stringify(option);
+                                    }
+                                }
+                            }
+                            return null;
+                        """)
+                        
+                        if chart_data:
+                            data = json.loads(chart_data)
+                            dates = []
+                            if 'xAxis' in data:
+                                for xa in data['xAxis']:
+                                    if 'data' in xa and len(xa['data']) > 0:
+                                        dates = xa['data']
+                                        break
+                            
+                            if len(dates) > 0:
+                                print(f"[{self.fund_code}] 图表数据已加载，共 {len(dates)} 条记录")
+                                break
+                        
+                        print(f"[{self.fund_code}] 等待图表数据加载... ({elapsed_time + wait_interval}秒)")
+                        time.sleep(wait_interval)
+                        elapsed_time += wait_interval
+                    
+                    if not chart_data:
+                        print(f"[{self.fund_code}] 等待超时，未能获取到图表数据")
+                        return None
+                    
+                    # 解析数据
+                    data = json.loads(chart_data)
+                    dates = []
+                    nav_data = []
+                    
+                    if 'xAxis' in data:
+                        for xa in data['xAxis']:
+                            if 'data' in xa:
+                                dates = xa['data']
+                    
+                    if 'series' in data:
+                        for s in data['series']:
+                            if 'data' in s and len(s.get('data', [])) > 0:
+                                nav_data = s.get('data', [])
+                                break
+                    
+                    # 转换为统一格式: {"YYYY-MM-DD": 净值}
+                    nav_dict = {}
+                    for i in range(len(dates)):
+                        try:
+                            date_str = dates[i]
+                            nav = nav_data[i] if i < len(nav_data) else None
+                            date_obj = datetime.strptime(date_str, "%d %b,%Y")
+                            formatted_date = date_obj.strftime("%Y-%m-%d")
+                            nav_dict[formatted_date] = float(nav) if nav is not None else None
+                        except:
+                            pass
+                    
+                    # 保存到缓存
+                    cache_data = {
+                        'cache_date': today,
+                        'data': nav_dict
+                    }
+                    with open(self.historical_nav_cache_file, 'w', encoding='utf-8') as f:
+                        json.dump(cache_data, f, ensure_ascii=False, indent=2)
+                    
+                    print(f"[{self.fund_code}] Historical NAV 数据已更新: {len(nav_dict)} 条记录")
+                    return nav_dict
+                
+                finally:
+                    driver.quit()
+                    print(f"[{self.fund_code}] 浏览器已关闭")
+        
+        except ImportError:
+            print(f"[{self.fund_code}] Selenium 未安装，跳过 Selenium 获取")
+        except Exception as e:
+            print(f"[{self.fund_code}] Selenium 获取失败: {e}")
+        
+        return None
+    
+    def _fetch_historical_nav_from_browser_drissionpage(self, today: str) -> Optional[dict]:
+        """使用 DrissionPage 获取 Historical NAV 数据"""
+        try:
+            from core.base import get_browser_lock
+            from DrissionPage import ChromiumPage, ChromiumOptions
+            import platform
+            
+            with get_browser_lock():
+                print(f"[{self.fund_code}] 正在使用 DrissionPage 获取 Historical NAV...")
+                
+                co = ChromiumOptions()
+                if platform.system() == 'Linux':
+                    co.headless(True)
+                    co.set_argument('--no-sandbox')
+                    co.set_argument('--disable-gpu')
+                    co.set_argument('--disable-dev-shm-usage')
+                
+                page = ChromiumPage(addr_or_opts=co)
+                page.get(self.main_url)
+                page.wait(3)
+                
+                try:
+                    agree_btn = page.ele("#StateAccept", timeout=3)
+                    if agree_btn:
+                        agree_btn.click()
+                        page.wait(1)
+                except:
+                    pass
+                
+                page.run_js("window.scrollTo(0, 1500)")
+                page.wait(1)
+                
+                historical_tab = page.ele("text:Historical NAVs", timeout=5)
+                if historical_tab:
+                    historical_tab.click()
+                    page.wait(5)
+                
+                # 等待图表数据加载，最多等待120秒
+                chart_data = None
+                max_wait_time = 120
+                wait_interval = 3
+                elapsed_time = 0
+                
+                while elapsed_time < max_wait_time:
+                    chart_data = page.run_js("""
+                        var chartDom = document.getElementById('PerformChart');
+                        if (chartDom && typeof echarts !== 'undefined') {
+                            var chart = echarts.getInstanceByDom(chartDom);
+                            if (chart) {
+                                var option = chart.getOption();
+                                if (option && option.xAxis && option.xAxis[0] && option.xAxis[0].data && option.xAxis[0].data.length > 0) {
+                                    return JSON.stringify(option);
+                                }
+                            }
+                        }
+                        return null;
+                    """)
+                    
+                    if chart_data:
+                        data = json.loads(chart_data)
+                        dates = []
+                        if 'xAxis' in data:
+                            for xa in data['xAxis']:
+                                if 'data' in xa and len(xa['data']) > 0:
+                                    dates = xa['data']
+                                    break
+                        
+                        if len(dates) > 0:
+                            print(f"[{self.fund_code}] 图表数据已加载，共 {len(dates)} 条记录")
+                            break
+                    
+                    print(f"[{self.fund_code}] 等待图表数据加载... ({elapsed_time + wait_interval}秒)")
+                    page.wait(wait_interval)
+                    elapsed_time += wait_interval
+                
+                if not chart_data:
+                    print(f"[{self.fund_code}] 等待超时，未能获取到图表数据")
+                
+                page.quit()
+                
+                if chart_data:
+                    data = json.loads(chart_data)
+                    dates = []
+                    nav_data = []
+                    
+                    if 'xAxis' in data:
+                        for xa in data['xAxis']:
+                            if 'data' in xa:
+                                dates = xa['data']
+                    
+                    if 'series' in data:
+                        for s in data['series']:
+                            if 'data' in s and len(s.get('data', [])) > 0:
+                                nav_data = s.get('data', [])
+                                break
+                    
+                    # 转换为统一格式: {"YYYY-MM-DD": 净值}
+                    nav_dict = {}
+                    for i in range(len(dates)):
+                        try:
+                            date_str = dates[i]
+                            nav = nav_data[i] if i < len(nav_data) else None
+                            # 解析日期格式 "DD Mon,YYYY" -> "YYYY-MM-DD"
+                            date_obj = datetime.strptime(date_str, "%d %b,%Y")
+                            formatted_date = date_obj.strftime("%Y-%m-%d")
+                            nav_dict[formatted_date] = float(nav) if nav is not None else None
+                        except:
+                            pass
+                    
+                    cache_data = {
+                        'cache_date': today,
+                        'data': nav_dict
+                    }
+                    
+                    with open(self.historical_nav_cache_file, 'w', encoding='utf-8') as f:
+                        json.dump(cache_data, f, ensure_ascii=False, indent=2)
+                    
+                    print(f"[{self.fund_code}] Historical NAV数据已更新: {len(nav_dict)}条记录")
+                    return nav_dict
+                    
+            return None
+                    
+        except ImportError:
+            print(f"[{self.fund_code}] DrissionPage 未安装，跳过 DrissionPage 获取")
+            return None
+        except Exception as e:
+            print(f"[{self.fund_code}] DrissionPage 获取失败: {e}")
+            return None
+    
+    def _calculate_nav_change(self, historical_nav, intraday_nav) -> Optional[dict]:
+        """计算NAV涨跌幅"""
+        try:
+            # 确保转换为浮点数
+            historical_nav = float(historical_nav) if historical_nav is not None else None
+            intraday_nav = float(intraday_nav) if intraday_nav is not None else None
+            
+            if historical_nav and intraday_nav and historical_nav > 0:
+                change = intraday_nav - historical_nav
+                change_pct = (change / historical_nav) * 100
+                return {
+                    'change': change,
+                    'change_pct': change_pct
+                }
+        except (ValueError, TypeError):
+            pass
+        return None

@@ -457,14 +457,183 @@ class Fund513730(BaseFund):
             return None
     
     def _fetch_historical_nav_from_browser(self, today: str) -> Optional[dict]:
-        """使用浏览器获取Historical NAV数据"""
+        """使用浏览器获取Historical NAV数据
+        
+        优先级：Selenium -> DrissionPage -> 缓存数据
+        """
+        # 1. 首先尝试 Selenium
+        result = self._fetch_historical_nav_from_browser_selenium(today)
+        if result:
+            return result
+        
+        # 2. Selenium 失败，尝试 DrissionPage
+        result = self._fetch_historical_nav_from_browser_drissionpage(today)
+        if result:
+            return result
+        
+        # 3. 都失败，返回 None（使用缓存数据）
+        print(f"[{self.fund_code}] Selenium 和 DrissionPage 都失败，使用缓存数据")
+        return None
+    
+    def _fetch_historical_nav_from_browser_selenium(self, today: str) -> Optional[dict]:
+        """使用 Selenium 获取 Historical NAV 数据"""
+        try:
+            from selenium import webdriver
+            from selenium.webdriver.common.by import By
+            from selenium.webdriver.support.ui import WebDriverWait
+            from selenium.webdriver.support import expected_conditions as EC
+            from selenium.webdriver.chrome.options import Options
+            from selenium.webdriver.chrome.service import Service
+            from webdriver_manager.chrome import ChromeDriverManager
+            from core.base import get_browser_lock
+            import platform
+            
+            with get_browser_lock():
+                print(f"[{self.fund_code}] 正在使用 Selenium 获取 Historical NAV...")
+                
+                chrome_options = Options()
+                if platform.system() == 'Linux':
+                    chrome_options.add_argument('--headless')
+                chrome_options.add_argument('--no-sandbox')
+                chrome_options.add_argument('--disable-gpu')
+                chrome_options.add_argument('--disable-dev-shm-usage')
+                chrome_options.add_argument('--window-size=1920,1080')
+                chrome_options.add_argument('--user-agent=Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36')
+                
+                service = Service(ChromeDriverManager().install())
+                driver = webdriver.Chrome(service=service, options=chrome_options)
+                
+                try:
+                    driver.get(self.main_url)
+                    time.sleep(3)
+                    
+                    # 点击同意 Cookie 按钮
+                    try:
+                        agree_btn = WebDriverWait(driver, 3).until(
+                            EC.element_to_be_clickable((By.ID, "StateAccept"))
+                        )
+                        if agree_btn:
+                            agree_btn.click()
+                            time.sleep(1)
+                    except:
+                        pass
+                    
+                    # 滚动页面
+                    driver.execute_script("window.scrollTo(0, 1500)")
+                    time.sleep(1)
+                    
+                    # 点击 Historical NAVs 标签
+                    try:
+                        historical_tab = WebDriverWait(driver, 5).until(
+                            EC.element_to_be_clickable((By.XPATH, "//*[contains(text(), 'Historical NAVs')]"))
+                        )
+                        if historical_tab:
+                            historical_tab.click()
+                            time.sleep(5)
+                    except:
+                        pass
+                    
+                    # 等待图表数据加载，最多等待120秒
+                    chart_data = None
+                    max_wait_time = 120
+                    wait_interval = 3
+                    elapsed_time = 0
+                    
+                    while elapsed_time < max_wait_time:
+                        chart_data = driver.execute_script("""
+                            var chartDom = document.getElementById('PerformChart');
+                            if (chartDom && typeof echarts !== 'undefined') {
+                                var chart = echarts.getInstanceByDom(chartDom);
+                                if (chart) {
+                                    var option = chart.getOption();
+                                    if (option && option.xAxis && option.xAxis[0] && option.xAxis[0].data && option.xAxis[0].data.length > 0) {
+                                        return JSON.stringify(option);
+                                    }
+                                }
+                            }
+                            return null;
+                        """)
+                        
+                        if chart_data:
+                            data = json.loads(chart_data)
+                            dates = []
+                            if 'xAxis' in data:
+                                for xa in data['xAxis']:
+                                    if 'data' in xa and len(xa['data']) > 0:
+                                        dates = xa['data']
+                                        break
+                            
+                            if len(dates) > 0:
+                                print(f"[{self.fund_code}] 图表数据已加载，共 {len(dates)} 条记录")
+                                break
+                        
+                        print(f"[{self.fund_code}] 等待图表数据加载... ({elapsed_time + wait_interval}秒)")
+                        time.sleep(wait_interval)
+                        elapsed_time += wait_interval
+                    
+                    if not chart_data:
+                        print(f"[{self.fund_code}] 等待超时，未能获取到图表数据")
+                        return None
+                    
+                    # 解析数据
+                    data = json.loads(chart_data)
+                    dates = []
+                    nav_data = []
+                    
+                    if 'xAxis' in data:
+                        for xa in data['xAxis']:
+                            if 'data' in xa:
+                                dates = xa['data']
+                    
+                    if 'series' in data:
+                        for s in data['series']:
+                            if 'data' in s and len(s.get('data', [])) > 0:
+                                nav_data = s.get('data', [])
+                                break
+                    
+                    # 转换为统一格式: {"YYYY-MM-DD": 净值}
+                    nav_dict = {}
+                    for i in range(len(dates)):
+                        try:
+                            date_str = dates[i]
+                            nav = nav_data[i] if i < len(nav_data) else None
+                            date_obj = datetime.strptime(date_str, "%d %b,%Y")
+                            formatted_date = date_obj.strftime("%Y-%m-%d")
+                            nav_dict[formatted_date] = float(nav) if nav is not None else None
+                        except:
+                            pass
+                    
+                    # 保存到缓存
+                    cache_data = {
+                        'cache_date': today,
+                        'data': nav_dict
+                    }
+                    with open(self.historical_nav_cache_file, 'w', encoding='utf-8') as f:
+                        json.dump(cache_data, f, ensure_ascii=False, indent=2)
+                    
+                    print(f"[{self.fund_code}] Historical NAV 数据已更新: {len(nav_dict)} 条记录")
+                    return nav_dict
+                
+                finally:
+                    driver.quit()
+                    print(f"[{self.fund_code}] 浏览器已关闭")
+        
+        except ImportError:
+            print(f"[{self.fund_code}] Selenium 未安装，跳过 Selenium 获取")
+        except Exception as e:
+            print(f"[{self.fund_code}] Selenium 获取失败: {e}")
+        
+        return None
+    
+    def _fetch_historical_nav_from_browser_drissionpage(self, today: str) -> Optional[dict]:
+        """使用 DrissionPage 获取 Historical NAV 数据"""
         try:
             from core.base import get_browser_lock
             from DrissionPage import ChromiumPage, ChromiumOptions
             import platform
             
             with get_browser_lock():
-                print(f"[{self.fund_code}] 正在使用浏览器获取Historical NAV...")
+                print(f"[{self.fund_code}] 正在使用 DrissionPage 获取 Historical NAV...")
                 
                 co = ChromiumOptions()
                 if platform.system() == 'Linux':
@@ -493,9 +662,9 @@ class Fund513730(BaseFund):
                     historical_tab.click()
                     page.wait(5)
                 
-                # 等待图表数据加载，最多等待30秒
+                # 等待图表数据加载，最多等待120秒
                 chart_data = None
-                max_wait_time = 30
+                max_wait_time = 120
                 wait_interval = 3
                 elapsed_time = 0
                 
@@ -579,10 +748,10 @@ class Fund513730(BaseFund):
             return None
                     
         except ImportError:
-            print(f"[{self.fund_code}] DrissionPage 未安装，跳过浏览器获取")
+            print(f"[{self.fund_code}] DrissionPage 未安装，跳过 DrissionPage 获取")
             return None
         except Exception as e:
-            print(f"[{self.fund_code}] 浏览器获取失败: {e}")
+            print(f"[{self.fund_code}] DrissionPage 获取失败: {e}")
             return None
     
     def _calculate_nav_change(self, historical_nav, intraday_nav) -> Optional[dict]:

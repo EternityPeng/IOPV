@@ -270,23 +270,100 @@ def show_main_dashboard(funds):
                             return 'white'
                         return '#e74c3c' if value > 0 else '#2ecc71' if value < 0 else 'white'
                     
-                    # 数据表格
+                    # 数据表格 - 完全匹配 GUI 输出格式
+                    # 构建各行的显示文本
+                    def format_field(label, value, format_str, prefix='', suffix='', date_info=None, time_info=None, extra_info=None):
+                        if value is None:
+                            display_value = 'N/A'
+                        else:
+                            try:
+                                display_value = f"{prefix}{value:{format_str}}{suffix}"
+                            except:
+                                display_value = 'N/A'
+                        
+                        if date_info:
+                            display_value += f" (日期: {date_info})"
+                        if time_info:
+                            display_value += f" (时间: {time_info})"
+                        if extra_info:
+                            display_value += f" ({extra_info})"
+                        
+                        return label, display_value
+                    
+                    # 汇率特殊格式化
+                    rate_display = 'N/A'
+                    if data.usd_cny_rate is not None:
+                        rate_display = f"{data.usd_cny_rate:.4f}"
+                        extra_parts = []
+                        if data.usd_cny_change_pct is not None:
+                            extra_parts.append(f"涨跌幅: {data.usd_cny_change_pct:.2f}%")
+                        if data.common_date:
+                            extra_parts.append(f"共同日期: {data.common_date}")
+                        if data.usd_cny_rate_on_common_date is not None:
+                            extra_parts.append(f"当时汇率: {data.usd_cny_rate_on_common_date:.4f}")
+                        if extra_parts:
+                            rate_display += f" ({', '.join(extra_parts)})"
+                    
+                    # 构建表格行
+                    rows = []
+                    rows.append(("场内价格", f"{data.market_price:.3f} CNY" if data.market_price is not None else "N/A"))
+                    rows.append(("涨跌幅", f"{data.market_change_pct:.2f}%" if data.market_change_pct is not None else "N/A", get_color(data.market_change_pct)))
+                    rows.append(("更新时间", data.market_time or "N/A"))
+                    rows.append(("估算实时净值", f"{data.estimated_nav:.4f} CNY" if data.estimated_nav is not None else "N/A"))
+                    rows.append(("溢价率", f"{data.premium_discount:.2f}%" if data.premium_discount is not None else "N/A", get_color(data.premium_discount)))
+                    
+                    # 最新基金净值 (带日期)
+                    latest_nav_display = "N/A"
+                    if data.latest_nav is not None:
+                        latest_nav_display = f"{data.latest_nav} CNY"
+                        if data.latest_nav_date:
+                            latest_nav_display += f" (日期: {data.latest_nav_date})"
+                    rows.append(("最新基金净值", latest_nav_display))
+                    
+                    # Intraday NAV (带时间)
+                    intraday_display = "N/A"
+                    if data.intraday_nav is not None:
+                        intraday_display = f"{data.intraday_nav} USD"
+                        if data.intraday_nav_time:
+                            intraday_display += f" (时间: {data.intraday_nav_time})"
+                    rows.append(("Intraday NAV", intraday_display))
+                    
+                    # Historical NAV (带日期)
+                    historical_display = "N/A"
+                    if data.historical_nav is not None:
+                        historical_display = f"{data.historical_nav} USD"
+                        if data.historical_nav_date:
+                            historical_display += f" (日期: {data.historical_nav_date})"
+                    rows.append(("Historical NAV", historical_display))
+                    
+                    # 共同日期净值 (带日期)
+                    common_display = "N/A"
+                    if data.common_date_nav is not None:
+                        common_display = f"{data.common_date_nav} CNY"
+                        if data.common_date:
+                            common_display += f" (日期: {data.common_date})"
+                    rows.append(("共同日期净值", common_display))
+                    
+                    # NAV涨跌幅
+                    rows.append(("NAV涨跌幅", f"{data.nav_change_pct:.2f}%" if data.nav_change_pct is not None else "N/A", get_color(data.nav_change_pct)))
+                    
+                    # 美元/人民币汇率
+                    rows.append(("美元/人民币汇率", rate_display))
+                    
+                    # 生成表格 HTML
+                    table_rows = ""
+                    for row in rows:
+                        if len(row) == 3:
+                            label, value, color = row
+                            table_rows += f'<tr><td style="padding: 8px; border-bottom: 1px solid #3d3d54;">{label}</td><td style="padding: 8px; border-bottom: 1px solid #3d3d54; text-align: right; color: {color};">{value}</td></tr>'
+                        else:
+                            label, value = row
+                            table_rows += f'<tr><td style="padding: 8px; border-bottom: 1px solid #3d3d54;">{label}</td><td style="padding: 8px; border-bottom: 1px solid #3d3d54; text-align: right;">{value}</td></tr>'
+                    
                     st.markdown(f"""
                     <div style="background-color: #2d2d44; padding: 15px; border-radius: 10px;">
                         <table style="width: 100%; border-collapse: collapse;">
-                            <tr><td style="padding: 8px; border-bottom: 1px solid #3d3d54;">场内价格</td><td style="padding: 8px; border-bottom: 1px solid #3d3d54; text-align: right;">{fmt(data.market_price, '.3f', '¥')}</td></tr>
-                            <tr><td style="padding: 8px; border-bottom: 1px solid #3d3d54;">涨跌幅</td><td style="padding: 8px; border-bottom: 1px solid #3d3d54; text-align: right; color: {get_color(data.market_change_pct)};">{fmt(data.market_change_pct, '+.2f', suffix='%')}</td></tr>
-                            <tr><td style="padding: 8px; border-bottom: 1px solid #3d3d54;">估算净值</td><td style="padding: 8px; border-bottom: 1px solid #3d3d54; text-align: right;">{fmt(data.estimated_nav, '.4f', '¥')}</td></tr>
-                            <tr style="background-color: rgba(74, 144, 217, 0.3);"><td style="padding: 10px; border-bottom: 2px solid #4a90d9; font-weight: bold;">折溢价率</td><td style="padding: 10px; border-bottom: 2px solid #4a90d9; text-align: right; font-weight: bold; font-size: 18px; color: {get_color(data.premium_discount)};">{fmt(data.premium_discount, '.2f', suffix='%')}</td></tr>
-                            <tr><td style="padding: 8px; border-bottom: 1px solid #3d3d54;">最新净值</td><td style="padding: 8px; border-bottom: 1px solid #3d3d54; text-align: right;">{fmt(data.latest_nav, '.4f', '¥')}</td></tr>
-                            <tr><td style="padding: 8px; border-bottom: 1px solid #3d3d54;">净值日期</td><td style="padding: 8px; border-bottom: 1px solid #3d3d54; text-align: right;">{data.latest_nav_date or 'N/A'}</td></tr>
-                            <tr><td style="padding: 8px; border-bottom: 1px solid #3d3d54;">NAV涨跌幅</td><td style="padding: 8px; border-bottom: 1px solid #3d3d54; text-align: right; color: {get_color(data.nav_change_pct)};">{fmt(data.nav_change_pct, '.2f', suffix='%')}</td></tr>
-                            <tr><td style="padding: 8px; border-bottom: 1px solid #3d3d54;">Intraday NAV</td><td style="padding: 8px; border-bottom: 1px solid #3d3d54; text-align: right;">{fmt(data.intraday_nav, '.4f', '$')}</td></tr>
-                            <tr><td style="padding: 8px; border-bottom: 1px solid #3d3d54;">Historical NAV</td><td style="padding: 8px; border-bottom: 1px solid #3d3d54; text-align: right;">{fmt(data.historical_nav, '.4f', '$')}</td></tr>
-                            <tr><td style="padding: 8px; border-bottom: 1px solid #3d3d54;">共同日期</td><td style="padding: 8px; border-bottom: 1px solid #3d3d54; text-align: right;">{data.common_date or 'N/A'}</td></tr>
-                            <tr><td style="padding: 8px; border-bottom: 1px solid #3d3d54;">汇率</td><td style="padding: 8px; border-bottom: 1px solid #3d3d54; text-align: right;">{fmt(data.usd_cny_rate, '.4f')}</td></tr>
-                            <tr><td style="padding: 8px; border-bottom: 1px solid #3d3d54;">汇率涨跌幅</td><td style="padding: 8px; border-bottom: 1px solid #3d3d54; text-align: right; color: {get_color(data.usd_cny_change_pct)};">{fmt(data.usd_cny_change_pct, '+.2f', suffix='%')}</td></tr>
-                            <tr><td style="padding: 8px;">共同日期汇率</td><td style="padding: 8px; text-align: right;">{fmt(data.usd_cny_rate_on_common_date, '.4f')}</td></tr>
+                            {table_rows}
                         </table>
                     </div>
                     """, unsafe_allow_html=True)
@@ -563,7 +640,7 @@ def show_premium_query():
             yaxis=dict(autorange=True, fixedrange=False)
         )
         
-        st.plotly_chart(fig, use_container_width=True)
+        st.plotly_chart(fig, width='stretch')
         
         st.divider()
         
@@ -585,7 +662,7 @@ def show_premium_query():
         
         st.dataframe(
             display_df,
-            use_container_width=True,
+            width='stretch',
             column_config={
                 "日期": st.column_config.TextColumn("日期"),
                 "收盘价": st.column_config.NumberColumn("收盘价", format="%.3f"),
@@ -623,7 +700,7 @@ def show_history_data(funds):
             
             if records:
                 df = pd.DataFrame(records)
-                st.dataframe(df, use_container_width=True)
+                st.dataframe(df, width='stretch')
                 
                 # 导出按钮
                 csv = df.to_csv(index=False)
